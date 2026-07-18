@@ -1,7 +1,7 @@
-import { 
-  Info, BarChart3, HelpCircle, GraduationCap, Award, CheckSquare, 
-  FileText, CreditCard, Landmark, Table, BookOpen, UserCheck, 
-  Briefcase, Star, MessageSquare 
+import {
+  Info, BarChart3, HelpCircle, GraduationCap, Award, CheckSquare,
+  FileText, CreditCard, Landmark, Table, BookOpen, UserCheck,
+  Briefcase, Star, MessageSquare
 } from 'lucide-react';
 
 export const PAGE_TYPES = {
@@ -10,28 +10,344 @@ export const PAGE_TYPES = {
   SPECIALIZATION: 'specialization'
 };
 
-export const SCHEMA_DETAILS = {
+// Shared repeater sub-field configs (reused across page types where the ACF spec repeats them)
+const REVIEWS_SUBFIELDS = [
+  { key: 'review_text', label: 'Review Text', type: 'textarea', placeholder: 'e.g. This program helped me transition into...' },
+  { key: 'reviewer_name', label: 'Reviewer Name', type: 'text', placeholder: 'e.g. Rohit Sharma' },
+  { key: 'reviewer_label', label: 'Reviewer Label', type: 'text', placeholder: 'e.g. Batch of 2024' }
+];
+
+const FAQS_SUBFIELDS = [
+  { key: 'question', label: 'Question', type: 'text', placeholder: 'e.g. Is this program approved by UGC?' },
+  { key: 'answer', label: 'Answer', type: 'textarea', placeholder: 'e.g. Yes, this program is recognized by the UGC-DEB.' }
+];
+
+const JOB_PROFILES_SUBFIELDS = [
+  { key: 'job_title', label: 'Job Title', type: 'text', placeholder: 'e.g. Product Marketing Manager' },
+  { key: 'avg_salary', label: 'Average Salary', type: 'text', placeholder: 'e.g. ₹10 LPA' }
+];
+
+const HIGHLIGHTS_SUBFIELDS = [
+  { key: 'highlight_title', label: 'Highlight Title', type: 'text', placeholder: 'e.g. Industry-Aligned Curriculum' },
+  { key: 'highlight_description', label: 'Highlight Description', type: 'text', placeholder: 'e.g. Designed with input from 50+ hiring partners' }
+];
+
+export const schemas = {
   [PAGE_TYPES.UNIVERSITY]: {
     id: PAGE_TYPES.UNIVERSITY,
     title: 'University Page',
-    fieldCount: 22,
-    estimatedTime: '20 mins',
+    sections: [
+      {
+        id: 'basic_info',
+        title: 'Basic Info',
+        icon: 'Info',
+        fields: [
+          { key: 'university_name', type: 'TEXT_INPUT', label: 'University Name', placeholder: 'e.g. NMIMS', required: true },
+          { key: 'university_full_name', type: 'TEXT_INPUT', label: 'University Full Name', placeholder: 'e.g. Narsee Monjee Institute...' },
+          { key: 'hero_description', type: 'TEXTAREA', label: 'Hero Short Description', placeholder: 'A short description of the university', required: true, rows: 3, aiAssist: { instructions: 'Write a 1-2 sentence hook that names the university and its flagship credential or mode of study. This is the first text a prospective student reads.' } },
+          { key: 'established_year', type: 'TEXT_INPUT', label: 'Established Year', placeholder: 'e.g. 1981' },
+          { key: 'naac_grade', type: 'TEXT_INPUT', label: 'NAAC Grade', placeholder: 'e.g. NAAC A++' },
+          { key: 'ugc_approved', type: 'TEXT_INPUT', label: 'UGC Approved', placeholder: 'e.g. UGC-DEB Approved' },
+          { key: 'mode_of_learning', type: 'TEXT_INPUT', label: 'Mode of Learning', placeholder: 'e.g. 100% Online' },
+          { key: 'starting_fee', type: 'TEXT_INPUT', label: 'Starting Fee', placeholder: 'e.g. ₹55,000' },
+          { key: 'num_programs', type: 'TEXT_INPUT', label: 'Number of Programs', placeholder: 'e.g. 15+' }
+        ]
+      },
+      {
+        id: 'about',
+        title: 'About the University',
+        icon: 'GraduationCap',
+        fields: [
+          { key: 'about_heading', type: 'TEXT_INPUT', label: 'About Section Heading', placeholder: 'e.g. About NMIMS' },
+          { key: 'about_content', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Detailed content about the university', required: true, aiAssist: { instructions: 'Write 2-3 short paragraphs introducing the university - its history, standing, and what makes it a credible choice for distance/online learners.' } }
+        ]
+      },
+      {
+        id: 'why_choose',
+        title: 'Why Choose',
+        icon: 'Star',
+        fields: [
+          { key: 'why_choose_heading', type: 'TEXT_INPUT', label: 'Why Choose Section Heading', placeholder: 'e.g. Why Choose NMIMS' },
+          { key: 'why_choose_content', type: 'RICH_TEXT', label: 'Why Choose Content', placeholder: 'Reasons to choose this university', aiAssist: { instructions: 'Write a short persuasive passage (2-3 short paragraphs or a tight bulleted list) on why a student should choose this university specifically, grounded only in the facts provided (accreditations, mode, fees, etc.).' } }
+        ]
+      },
+      {
+        id: 'facts',
+        title: 'Facts',
+        icon: 'CheckSquare',
+        fields: [
+          { key: 'facts_heading', type: 'TEXT_INPUT', label: 'Facts Section Heading', placeholder: 'e.g. Quick Facts' },
+          { key: 'facts', type: 'REPEATER', label: 'Facts', subfields: [
+            { key: 'fact_title', label: 'Fact Title', type: 'text', placeholder: 'e.g. Established' },
+            { key: 'fact_description', label: 'Fact Description', type: 'text', placeholder: 'e.g. 1981' }
+          ] }
+        ]
+      },
+      {
+        id: 'accreditations',
+        title: 'Rankings & Accreditations',
+        icon: 'Award',
+        fields: [
+          { key: 'accreditations_heading', type: 'TEXT_INPUT', label: 'Accreditations Section Heading', placeholder: 'e.g. Rankings & Accreditations' },
+          { key: 'accreditations', type: 'REPEATER', label: 'Accreditations', subfields: [
+            { key: 'body_name', label: 'Body Name', type: 'text', placeholder: 'e.g. NAAC' },
+            { key: 'body_descriptor', label: 'Body Descriptor', type: 'text', placeholder: 'e.g. Grade' },
+            { key: 'body_detail', label: 'Body Detail', type: 'text', placeholder: 'e.g. A++' }
+          ] }
+        ]
+      },
+      {
+        id: 'programs',
+        title: 'Programs',
+        icon: 'Table',
+        fields: [
+          { key: 'programs_heading', type: 'TEXT_INPUT', label: 'Programs Section Heading', placeholder: 'e.g. Programs Offered' },
+          { key: 'programs_intro', type: 'TEXT_INPUT', label: 'Programs Intro', placeholder: 'Short intro line above the programs table' },
+          { key: 'programs_table', type: 'REPEATER', label: 'Programs', subfields: [
+            { key: 'program_name', label: 'Program Name', type: 'text', placeholder: 'e.g. MBA in General Management' },
+            { key: 'program_fee', label: 'Program Fee', type: 'text', placeholder: 'e.g. ₹1.5L' },
+            { key: 'program_eligibility', label: 'Program Eligibility', type: 'textarea', placeholder: 'e.g. Graduation in any discipline' }
+          ] }
+        ]
+      },
+      {
+        id: 'admission',
+        title: 'Admission',
+        icon: 'UserCheck',
+        fields: [
+          { key: 'admission_heading', type: 'TEXT_INPUT', label: 'Admission Section Heading', placeholder: 'e.g. Admission Process' },
+          { key: 'admission_steps', type: 'RICH_TEXT', label: 'Admission Steps', placeholder: 'Describe the admission process, steps can be an ordered list', aiAssist: { instructions: 'Describe the admission process as a short ordered sequence of steps a prospective student needs to follow.' } },
+          { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
+        ]
+      },
+      {
+        id: 'emi',
+        title: 'EMI',
+        icon: 'Landmark',
+        fields: [
+          { key: 'emi_heading', type: 'TEXT_INPUT', label: 'EMI Section Heading', placeholder: 'e.g. EMI Options' },
+          { key: 'emi_content', type: 'RICH_TEXT', label: 'EMI Content', placeholder: 'Describe EMI plans and partner banks', aiAssist: { instructions: 'Explain the EMI options and partner banks available for fee payment, in plain reassuring terms, grounded only in the facts provided.' } }
+        ]
+      },
+      {
+        id: 'exam',
+        title: 'Examination',
+        icon: 'FileText',
+        fields: [
+          { key: 'exam_heading', type: 'TEXT_INPUT', label: 'Examination Section Heading', placeholder: 'e.g. Examination Pattern' },
+          { key: 'exam_content', type: 'RICH_TEXT', label: 'Examination Content', placeholder: 'Describe the examination pattern', aiAssist: { instructions: 'Describe the examination pattern and format students can expect, grounded only in the facts provided.' } }
+        ]
+      },
+      {
+        id: 'faculty',
+        title: 'Faculty',
+        icon: 'Briefcase',
+        fields: [
+          { key: 'faculty_heading', type: 'TEXT_INPUT', label: 'Faculty Section Heading', placeholder: 'e.g. Meet Our Faculty' },
+          { key: 'faculty_intro', type: 'TEXTAREA', label: 'Faculty Intro', placeholder: 'Short intro about the faculty', rows: 2, aiAssist: { instructions: 'Write a short 1-2 sentence introduction to the faculty section, grounded only in the facts provided.' } },
+          { key: 'faculty_members', type: 'REPEATER', label: 'Faculty Members', subfields: [
+            { key: 'member_name', label: 'Member Name', type: 'text', placeholder: 'e.g. Dr. Anita Rao' },
+            { key: 'member_program', label: 'Member Program', type: 'text', placeholder: 'e.g. MBA Marketing' },
+            { key: 'member_designation', label: 'Member Designation', type: 'text', placeholder: 'e.g. Professor' },
+            { key: 'member_qualification', label: 'Member Qualification', type: 'text', placeholder: 'e.g. PhD, IIM Ahmedabad' }
+          ] }
+        ]
+      },
+      {
+        id: 'placement',
+        title: 'Placement',
+        icon: 'BarChart3',
+        fields: [
+          { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
+          { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
+        ]
+      },
+      {
+        id: 'reviews_sec',
+        title: 'Reviews',
+        icon: 'MessageSquare',
+        fields: [
+          { key: 'reviews_heading', type: 'TEXT_INPUT', label: 'Reviews Section Heading', placeholder: 'e.g. Student Reviews' },
+          { key: 'reviews', type: 'REPEATER', label: 'Reviews', subfields: REVIEWS_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'faqs_sec',
+        title: 'FAQs',
+        icon: 'HelpCircle',
+        fields: [
+          { key: 'faqs_heading', type: 'TEXT_INPUT', label: 'FAQs Section Heading', placeholder: 'e.g. Frequently Asked Questions' },
+          { key: 'faqs', type: 'REPEATER', label: 'FAQs', subfields: FAQS_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'seo',
+        title: 'SEO',
+        icon: 'BookOpen',
+        fields: [
+          { key: 'seo_title', type: 'TEXT_INPUT', label: 'SEO Title', placeholder: 'e.g. NMIMS Distance Learning | DegreeBaba', aiAssist: { instructions: 'Write an SEO title (max 60 characters) that includes the university name and its most distinctive credential.' } },
+          { key: 'meta_description', type: 'TEXTAREA', label: 'Meta Description', placeholder: 'A short SEO meta description', rows: 2, aiAssist: { instructions: 'Write an SEO meta description (max 155 characters) summarizing this page, optimized for search click-through, grounded only in the facts provided.' } }
+        ]
+      }
+    ]
   },
+
   [PAGE_TYPES.COURSE]: {
     id: PAGE_TYPES.COURSE,
     title: 'Course Page',
-    fieldCount: 20,
-    estimatedTime: '18 mins',
+    sections: [
+      {
+        id: 'basic_info',
+        title: 'Basic Info',
+        icon: 'Info',
+        fields: [
+          { key: 'program_name', type: 'TEXT_INPUT', label: 'Program Name', placeholder: 'e.g. MBA in General Management', required: true },
+          { key: 'university_name', type: 'TEXT_INPUT', label: 'University Name', placeholder: 'e.g. NMIMS', required: true },
+          { key: 'linked_university', type: 'SEARCHABLE_SELECT', directoryPageType: 'university', label: 'Linked University', placeholder: 'Search approved universities…' },
+          { key: 'hero_description', type: 'TEXTAREA', label: 'Hero Short Description', placeholder: 'A short description of the course', required: true, rows: 3, aiAssist: { instructions: 'Write a 1-2 sentence hook naming the program and university, highlighting its most distinctive credential.' } },
+          { key: 'duration', type: 'TEXT_INPUT', label: 'Duration', placeholder: 'e.g. 2 Years' },
+          { key: 'mode', type: 'TEXT_INPUT', label: 'Mode', placeholder: 'e.g. Online' },
+          { key: 'naac_grade', type: 'TEXT_INPUT', label: 'NAAC Grade', placeholder: 'e.g. NAAC A++' },
+          { key: 'ugc_status', type: 'TEXT_INPUT', label: 'UGC Status', placeholder: 'e.g. UGC-DEB Approved' },
+          { key: 'total_fee', type: 'TEXT_INPUT', label: 'Total Fee', placeholder: 'e.g. ₹1.5L' },
+          { key: 'starting_fee', type: 'TEXT_INPUT', label: 'Starting Fee', placeholder: 'e.g. ₹35,000' },
+          { key: 'num_specializations', type: 'TEXT_INPUT', label: 'Number of Specializations', placeholder: 'e.g. 6' },
+          { key: 'eligibility_summary', type: 'TEXT_INPUT', label: 'Eligibility Summary', placeholder: 'e.g. Graduation in any discipline' }
+        ]
+      },
+      {
+        id: 'about',
+        title: 'About the Course',
+        icon: 'GraduationCap',
+        fields: [
+          { key: 'about_heading', type: 'TEXT_INPUT', label: 'About Section Heading', placeholder: 'e.g. About the Program' },
+          { key: 'about_content', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Detailed content about the course', required: true, aiAssist: { instructions: 'Write 2-3 short paragraphs describing the course - what it covers, who it is for, and its key credential.' } }
+        ]
+      },
+      {
+        id: 'highlights',
+        title: 'Highlights',
+        icon: 'Star',
+        fields: [
+          { key: 'highlights_heading', type: 'TEXT_INPUT', label: 'Highlights Section Heading', placeholder: 'e.g. Program Highlights' },
+          { key: 'highlights', type: 'REPEATER', label: 'Highlights', subfields: HIGHLIGHTS_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'accreditations',
+        title: 'Accreditations',
+        icon: 'Award',
+        fields: [
+          { key: 'accreditations_heading', type: 'TEXT_INPUT', label: 'Accreditations Section Heading', placeholder: 'e.g. Accreditations' }
+        ]
+      },
+      {
+        id: 'specializations',
+        title: 'Specializations',
+        icon: 'Table',
+        fields: [
+          { key: 'specializations_heading', type: 'TEXT_INPUT', label: 'Specializations Section Heading', placeholder: 'e.g. Available Specializations' },
+          { key: 'specializations_intro', type: 'TEXT_INPUT', label: 'Specializations Intro', placeholder: 'Short intro line above specializations' }
+        ]
+      },
+      {
+        id: 'fee',
+        title: 'Fee',
+        icon: 'CreditCard',
+        fields: [
+          { key: 'fee_heading', type: 'TEXT_INPUT', label: 'Fee Section Heading', placeholder: 'e.g. Fee Structure' },
+          { key: 'fee_plans', type: 'REPEATER', label: 'Fee Plans', subfields: [
+            { key: 'plan_name', label: 'Plan Name', type: 'text', placeholder: 'e.g. Semester Plan' },
+            { key: 'plan_amount', label: 'Plan Amount', type: 'text', placeholder: 'e.g. ₹35,000' },
+            { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
+          ] },
+          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month' },
+          { key: 'validity', type: 'TEXT_INPUT', label: 'Validity', placeholder: 'e.g. 4 Years' }
+        ]
+      },
+      {
+        id: 'eligibility',
+        title: 'Eligibility',
+        icon: 'CheckSquare',
+        fields: [
+          { key: 'eligibility_heading', type: 'TEXT_INPUT', label: 'Eligibility Section Heading', placeholder: 'e.g. Eligibility Criteria' },
+          { key: 'eligibility_content', type: 'RICH_TEXT', label: 'Eligibility Content', placeholder: 'Describe eligibility requirements', required: true, aiAssist: { instructions: 'Describe the eligibility requirements for admission in plain, precise terms, grounded only in the facts provided.' } }
+        ]
+      },
+      {
+        id: 'admission',
+        title: 'Admission',
+        icon: 'UserCheck',
+        fields: [
+          { key: 'admission_heading', type: 'TEXT_INPUT', label: 'Admission Section Heading', placeholder: 'e.g. Admission Process' },
+          { key: 'admission_steps', type: 'RICH_TEXT', label: 'Admission Steps', placeholder: 'Describe the admission process', aiAssist: { instructions: 'Describe the admission process as a short ordered sequence of steps a prospective student needs to follow.' } },
+          { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
+        ]
+      },
+      {
+        id: 'syllabus',
+        title: 'Syllabus',
+        icon: 'BookOpen',
+        fields: [
+          { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
+          { key: 'syllabus_content', type: 'RICH_TEXT', label: 'Syllabus Content', placeholder: 'Describe the syllabus / subjects', required: true, aiAssist: { instructions: 'Summarize the syllabus/subjects covered in this course, grounded only in the facts provided.' } }
+        ]
+      },
+      {
+        id: 'placement',
+        title: 'Placement',
+        icon: 'BarChart3',
+        fields: [
+          { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
+          { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
+        ]
+      },
+      {
+        id: 'jobs',
+        title: 'Job Opportunities',
+        icon: 'Briefcase',
+        fields: [
+          { key: 'jobs_heading', type: 'TEXT_INPUT', label: 'Jobs Section Heading', placeholder: 'e.g. Job Opportunities' },
+          { key: 'job_profiles', type: 'REPEATER', label: 'Job Profiles', subfields: JOB_PROFILES_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'certificate',
+        title: 'Certificate',
+        icon: 'FileText',
+        fields: [
+          { key: 'certificate_description', type: 'TEXTAREA', label: 'Certificate Description', placeholder: 'Post-completion, enrolled students...', rows: 3, aiAssist: { instructions: 'Describe the certificate/credential awarded on completion, grounded only in the facts provided.' } }
+        ]
+      },
+      {
+        id: 'reviews_sec',
+        title: 'Reviews',
+        icon: 'MessageSquare',
+        fields: [
+          { key: 'reviews', type: 'REPEATER', label: 'Reviews', subfields: REVIEWS_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'faqs_sec',
+        title: 'FAQs',
+        icon: 'HelpCircle',
+        fields: [
+          { key: 'faqs_heading', type: 'TEXT_INPUT', label: 'FAQs Section Heading', placeholder: 'e.g. Frequently Asked Questions' },
+          { key: 'faqs', type: 'REPEATER', label: 'FAQs', subfields: FAQS_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'seo',
+        title: 'SEO',
+        icon: 'Landmark',
+        fields: [
+          { key: 'seo_title', type: 'TEXT_INPUT', label: 'SEO Title', placeholder: 'e.g. MBA in General Management | NMIMS', aiAssist: { instructions: 'Write an SEO title (max 60 characters) including the program name and university.' } },
+          { key: 'meta_description', type: 'TEXTAREA', label: 'Meta Description', placeholder: 'A short SEO meta description', rows: 2, aiAssist: { instructions: 'Write an SEO meta description (max 155 characters) summarizing this page, optimized for search click-through, grounded only in the facts provided.' } }
+        ]
+      }
+    ]
   },
-  [PAGE_TYPES.SPECIALIZATION]: {
-    id: PAGE_TYPES.SPECIALIZATION,
-    title: 'Specialization Page',
-    fieldCount: 54,
-    estimatedTime: '30 mins',
-  }
-};
 
-export const schemas = {
   [PAGE_TYPES.SPECIALIZATION]: {
     id: PAGE_TYPES.SPECIALIZATION,
     title: 'Specialization Page',
@@ -43,48 +359,32 @@ export const schemas = {
         fields: [
           { key: 'spec_name', type: 'TEXT_INPUT', label: 'Specialization Name', placeholder: 'e.g. MBA in Marketing Management', required: true },
           { key: 'university_name', type: 'TEXT_INPUT', label: 'University Name', placeholder: 'e.g. NMIMS', required: true },
-          { key: 'university_full_name', type: 'TEXT_INPUT', label: 'University Full Name', placeholder: 'e.g. Narsee Monjee Institute...' },
-          { key: 'spec_tag_label', type: 'TEXT_INPUT', label: 'Hero Tag Line', placeholder: 'e.g. MBA Specialization · Marketing' },
-          { key: 'hero_description', type: 'TEXTAREA', label: 'Hero Short Description (1-2 lines)', placeholder: 'Shown below the title in the hero section', required: true, rows: 3 },
-          { 
-            key: 'badges', 
-            type: 'BADGE_SELECTOR', 
-            label: 'Badges', 
-            options: ["UGC Approved", "NAAC A++", "NAAC A+", "NAAC A", "100% Online", "2 Years", "Working Professionals", "AIU Member", "AICTE Approved"] 
-          }
+          { key: 'linked_university', type: 'SEARCHABLE_SELECT', directoryPageType: 'university', label: 'Linked University', placeholder: 'Search approved universities…' },
+          { key: 'linked_course', type: 'SEARCHABLE_SELECT', directoryPageType: 'course', scopedByFieldKey: 'linked_university', label: 'Linked Course', placeholder: 'Search approved courses…' },
+          { key: 'duration', type: 'TEXT_INPUT', label: 'Duration', placeholder: 'e.g. 2 Years' },
+          { key: 'mode', type: 'TEXT_INPUT', label: 'Mode', placeholder: 'e.g. Online' },
+          { key: 'naac_grade', type: 'TEXT_INPUT', label: 'NAAC Grade', placeholder: 'e.g. NAAC A++' },
+          { key: 'ugc_status', type: 'TEXT_INPUT', label: 'UGC Status', placeholder: 'e.g. UGC-DEB Approved' },
+          { key: 'total_fee', type: 'TEXT_INPUT', label: 'Total Fee', placeholder: 'e.g. ₹1,96,000', required: true },
+          { key: 'eligibility_summary', type: 'TEXT_INPUT', label: 'Eligibility Summary', placeholder: 'e.g. Graduation in any discipline' }
         ]
       },
       {
-        id: 'hero_stats',
-        title: 'Hero Stats',
-        icon: 'BarChart3',
-        description: 'These 5 numbers appear in the hero bar',
-        fields: [
-          { key: 'stat_best_price', type: 'TEXT_INPUT', label: 'Best Price', placeholder: 'e.g. ₹1.96L' },
-          { key: 'stat_duration', type: 'TEXT_INPUT', label: 'Duration', placeholder: 'e.g. 2 Yrs' },
-          { key: 'stat_faculty', type: 'TEXT_INPUT', label: 'Faculty Stat', placeholder: 'e.g. 120+' },
-          { key: 'stat_hiring_firms', type: 'TEXT_INPUT', label: 'Hiring Firms', placeholder: 'e.g. 8K+' },
-          { key: 'stat_top_salary', type: 'TEXT_INPUT', label: 'Top Salary', placeholder: 'e.g. ₹10 LPA' }
-        ]
-      },
-      {
-        id: 'about_spec',
+        id: 'about',
         title: 'About the Specialization',
         icon: 'GraduationCap',
         fields: [
-          { key: 'spec_about', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Full description of the specialization', required: true },
-          { key: 'fact_duration', type: 'TEXT_INPUT', label: 'Fact Card 1 — Duration', placeholder: 'e.g. 2 Yrs' },
-          { key: 'fact_validity', type: 'TEXT_INPUT', label: 'Fact Card 2 — Validity', placeholder: 'e.g. 4 Yrs' },
-          { key: 'fact_faculty_count', type: 'TEXT_INPUT', label: 'Fact Card 3 — Faculty', placeholder: 'e.g. 120+' },
-          { key: 'pros_list', type: 'LIST_BUILDER', label: 'Key Advantages (shown as checkmarks)', placeholder: 'e.g. World-class faculty: 120+ IIT...', required: true }
+          { key: 'about_heading', type: 'TEXT_INPUT', label: 'About Section Heading', placeholder: 'e.g. About This Specialization' },
+          { key: 'about_content', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Full description of the specialization', required: true, aiAssist: { instructions: 'Write 2-3 short paragraphs describing this specialization track - what it covers and why it is valuable, grounded only in the facts provided.' } }
         ]
       },
       {
         id: 'highlights',
-        title: 'Program Highlights',
-        icon: 'Award',
+        title: 'Highlights',
+        icon: 'Star',
         fields: [
-          { key: 'course_facts', type: 'LIST_BUILDER', label: 'Program Highlight Points', placeholder: 'e.g. 2-Year PG Degree, 4-Year Validity', required: true }
+          { key: 'highlights_heading', type: 'TEXT_INPUT', label: 'Highlights Section Heading', placeholder: 'e.g. Program Highlights' },
+          { key: 'highlights', type: 'REPEATER', label: 'Highlights', subfields: HIGHLIGHTS_SUBFIELDS }
         ]
       },
       {
@@ -92,94 +392,75 @@ export const schemas = {
         title: 'Eligibility',
         icon: 'CheckSquare',
         fields: [
-          { key: 'eligibility_education', type: 'TEXTAREA', label: 'Education Qualification', placeholder: 'e.g. Completed a bachelor\'s degree...', required: true, rows: 3 },
-          { key: 'eligibility_marks', type: 'TEXTAREA', label: 'Minimum Marks Requirement', placeholder: 'e.g. Minimum 50% aggregate...', rows: 2 },
-          { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
+          { key: 'eligibility_heading', type: 'TEXT_INPUT', label: 'Eligibility Section Heading', placeholder: 'e.g. Eligibility Criteria' },
+          { key: 'eligibility_content', type: 'RICH_TEXT', label: 'Eligibility Content', placeholder: 'Describe eligibility requirements', required: true, aiAssist: { instructions: 'Describe the eligibility requirements for admission in plain, precise terms, grounded only in the facts provided.' } }
         ]
       },
       {
-        id: 'fee_structure',
-        title: 'Fee Structure',
+        id: 'fee',
+        title: 'Fee',
         icon: 'CreditCard',
-        description: '3 Payment Plans',
         fields: [
-          { key: 'fee_semester_amount', type: 'TEXT_INPUT', label: 'Semester Plan — Per Semester Amount', placeholder: 'e.g. ₹55,000' },
-          { key: 'fee_semester_total', type: 'TEXT_INPUT', label: 'Semester Plan — Total', placeholder: 'e.g. ₹2,20,000' },
-          { key: 'fee_annual_amount', type: 'TEXT_INPUT', label: 'Annual Plan — Per Year Amount', placeholder: 'e.g. ₹1,05,000' },
-          { key: 'fee_annual_total', type: 'TEXT_INPUT', label: 'Annual Plan — Total', placeholder: 'e.g. ₹2,10,000' },
-          { key: 'fee_onetime_amount', type: 'TEXT_INPUT', label: 'One-Time Payment Amount (Best Value)', placeholder: 'e.g. ₹1,96,000', required: true },
-          { key: 'fee_savings_note', type: 'TEXT_INPUT', label: 'Savings Note for One-Time', placeholder: 'e.g. Save ₹24,000' }
-        ]
-      },
-      {
-        id: 'emi',
-        title: 'EMI',
-        icon: 'Landmark',
-        fields: [
-          { key: 'emi_starting_amount', type: 'TEXT_INPUT', label: 'EMI Starting From (per month)', placeholder: 'e.g. ₹8,750', required: true },
-          { key: 'emi_tenures', type: 'LIST_BUILDER', label: 'Available EMI Tenures (months)', placeholder: 'e.g. 3, 6, 9, 12' },
-          { key: 'emi_highlighted_tenure', type: 'TEXT_INPUT', label: 'Highlighted/Best Tenure', placeholder: 'e.g. 12' },
-          { key: 'emi_partner_banks', type: 'LIST_BUILDER', label: 'Partner Banks', placeholder: 'e.g. HDFC Bank' },
-          { key: 'scholarship_note', type: 'TEXTAREA', label: 'Scholarship Note', placeholder: 'e.g. Merit & need-based tuition relief...', rows: 2 }
+          { key: 'fee_heading', type: 'TEXT_INPUT', label: 'Fee Section Heading', placeholder: 'e.g. Fee Structure' },
+          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month', required: true }
         ]
       },
       {
         id: 'other_specs',
-        title: 'Other Specializations Table',
+        title: 'Other Specializations',
         icon: 'Table',
         fields: [
-          { key: 'specialization_fees', type: 'TABLE_BUILDER', label: 'All Specializations & Fees', columns: ['specialization', 'fee_per_semester'], required: true }
+          { key: 'other_specs_heading', type: 'TEXT_INPUT', label: 'Other Specializations Section Heading', placeholder: 'e.g. Other Specializations & Fees' },
+          { key: 'other_specs', type: 'REPEATER', label: 'Other Specializations', subfields: [
+            { key: 'other_spec_name', label: 'Specialization Name', type: 'text', placeholder: 'e.g. MBA in Finance' },
+            { key: 'other_spec_fee', label: 'Fee Per Semester', type: 'text', placeholder: 'e.g. ₹55,000' }
+          ] }
         ]
       },
       {
         id: 'syllabus',
         title: 'Syllabus',
         icon: 'BookOpen',
-        description: 'Enter subjects for each semester',
         fields: [
-          { key: 'syllabus_y1_s1', type: 'LIST_BUILDER', label: 'Year 1 — Semester 1 Subjects', required: true },
-          { key: 'syllabus_y1_s2', type: 'LIST_BUILDER', label: 'Year 1 — Semester 2 Subjects', required: true },
-          { key: 'syllabus_y2_s3', type: 'LIST_BUILDER', label: 'Year 2 — Semester 3 Subjects', required: true },
-          { key: 'syllabus_y2_s4', type: 'LIST_BUILDER', label: 'Year 2 — Semester 4 Subjects', required: true }
+          { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
+          { key: 'syllabus_content', type: 'RICH_TEXT', label: 'Syllabus Content', placeholder: 'Describe subjects covered per semester', required: true, aiAssist: { instructions: 'Summarize the subjects covered per semester in this specialization, grounded only in the facts provided.' } }
         ]
       },
       {
-        id: 'examination',
+        id: 'exam',
         title: 'Examination',
         icon: 'FileText',
         fields: [
-          { key: 'exam_pattern', type: 'TEXTAREA', label: 'Examination Pattern Description', placeholder: 'e.g. Online proctored platform...', rows: 4 }
+          { key: 'exam_heading', type: 'TEXT_INPUT', label: 'Examination Section Heading', placeholder: 'e.g. Examination Pattern' },
+          { key: 'exam_content', type: 'RICH_TEXT', label: 'Examination Content', placeholder: 'Describe the examination pattern', aiAssist: { instructions: 'Describe the examination pattern and format students can expect, grounded only in the facts provided.' } }
         ]
       },
       {
-        id: 'admission_process_sec',
+        id: 'admission',
         title: 'Admission Process',
         icon: 'UserCheck',
         fields: [
-          { key: 'admission_process', type: 'STEP_BUILDER', label: 'Admission Steps', required: true }
+          { key: 'admission_heading', type: 'TEXT_INPUT', label: 'Admission Section Heading', placeholder: 'e.g. Admission Process' },
+          { key: 'admission_steps', type: 'RICH_TEXT', label: 'Admission Steps', placeholder: 'Describe the admission process', required: true, aiAssist: { instructions: 'Describe the admission process as a short ordered sequence of steps a prospective student needs to follow.' } },
+          { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
         ]
       },
       {
         id: 'placement',
         title: 'Placement',
-        icon: 'Briefcase',
+        icon: 'BarChart3',
         fields: [
-          { key: 'placement_stat_1_value', type: 'TEXT_INPUT', label: 'Stat 1 Value', placeholder: 'e.g. 40%' },
-          { key: 'placement_stat_1_label', type: 'TEXT_INPUT', label: 'Stat 1 Label', placeholder: 'e.g. Profile ranking improvement' },
-          { key: 'placement_stat_2_value', type: 'TEXT_INPUT', label: 'Stat 2 Value', placeholder: 'e.g. 500+' },
-          { key: 'placement_stat_2_label', type: 'TEXT_INPUT', label: 'Stat 2 Label', placeholder: 'e.g. Hiring partners' },
-          { key: 'placement_stat_3_value', type: 'TEXT_INPUT', label: 'Stat 3 Value', placeholder: 'e.g. 6 mo' },
-          { key: 'placement_stat_3_label', type: 'TEXT_INPUT', label: 'Stat 3 Label', placeholder: 'e.g. Job portal access' },
-          { key: 'placement_services', type: 'LIST_BUILDER', label: 'Career Services List', placeholder: 'e.g. Job portal access (IIMJobs...)' },
-          { key: 'placement_partners', type: 'LIST_BUILDER', label: 'Top Hiring Partners', placeholder: 'e.g. ICICI Securities', required: true }
+          { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
+          { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
       {
-        id: 'job_opportunities',
+        id: 'jobs',
         title: 'Job Opportunities',
-        icon: 'Star',
+        icon: 'Briefcase',
         fields: [
-          { key: 'job_roles', type: 'TABLE_BUILDER', label: 'Job Roles & Salaries', columns: ['job_profile', 'average_salary'], required: true }
+          { key: 'jobs_heading', type: 'TEXT_INPUT', label: 'Jobs Section Heading', placeholder: 'e.g. Job Opportunities' },
+          { key: 'job_profiles', type: 'REPEATER', label: 'Job Profiles', subfields: JOB_PROFILES_SUBFIELDS }
         ]
       },
       {
@@ -187,7 +468,8 @@ export const schemas = {
         title: 'Certificate',
         icon: 'Award',
         fields: [
-          { key: 'certificate_description', type: 'TEXTAREA', label: 'Certificate Description', placeholder: 'Post-completion, enrolled students...', rows: 3 }
+          { key: 'certificate_heading', type: 'TEXT_INPUT', label: 'Certificate Section Heading', placeholder: 'e.g. Certificate' },
+          { key: 'certificate_description', type: 'TEXTAREA', label: 'Certificate Description', placeholder: 'Post-completion, enrolled students...', rows: 3, aiAssist: { instructions: 'Describe the certificate/credential awarded on completion, grounded only in the facts provided.' } }
         ]
       },
       {
@@ -195,7 +477,7 @@ export const schemas = {
         title: 'Reviews',
         icon: 'MessageSquare',
         fields: [
-          { key: 'reviews', type: 'REVIEW_BUILDER', label: 'Student Reviews', required: true }
+          { key: 'reviews', type: 'REPEATER', label: 'Reviews', subfields: REVIEWS_SUBFIELDS }
         ]
       },
       {
@@ -203,143 +485,62 @@ export const schemas = {
         title: 'FAQs',
         icon: 'HelpCircle',
         fields: [
-          { key: 'faqs', type: 'FAQ_BUILDER', label: 'Frequently Asked Questions', required: true }
+          { key: 'faqs_heading', type: 'TEXT_INPUT', label: 'FAQs Section Heading', placeholder: 'e.g. Frequently Asked Questions' },
+          { key: 'faqs', type: 'REPEATER', label: 'FAQs', subfields: FAQS_SUBFIELDS }
+        ]
+      },
+      {
+        id: 'seo',
+        title: 'SEO',
+        icon: 'Landmark',
+        fields: [
+          { key: 'seo_title', type: 'TEXT_INPUT', label: 'SEO Title', placeholder: 'e.g. MBA in Marketing Management | NMIMS', aiAssist: { instructions: 'Write an SEO title (max 60 characters) including the specialization name and university.' } },
+          { key: 'meta_description', type: 'TEXTAREA', label: 'Meta Description', placeholder: 'A short SEO meta description', rows: 2, aiAssist: { instructions: 'Write an SEO meta description (max 155 characters) summarizing this page, optimized for search click-through, grounded only in the facts provided.' } }
         ]
       }
     ]
-  },
-  
+  }
+};
+
+// Every scalar/rich-text field is required by default; SEO fields are the one exception since
+// they're fully AI-generated from the rest of the page's data rather than typed by the writer.
+// REPEATER fields (Highlights, Reviews, FAQs, Job Profiles, etc.) are never forced required here:
+// how many of these a real institution/course actually has varies and can legitimately be zero
+// (a brand-new course may have no reviews yet, a university may have no FAQs written), so a
+// blanket minimum count would block otherwise-complete drafts. Applied here (once, on the schema
+// objects themselves) rather than hand-set per field so it can't drift as fields are added, and
+// so the UI (asterisks, "Required Fields" badges) stays in sync for free.
+const AI_ONLY_FIELD_KEYS = new Set(['seo_title', 'meta_description']);
+
+Object.values(schemas).forEach(schema => {
+  schema.sections.forEach(section => {
+    section.fields.forEach(field => {
+      field.required = field.type !== 'REPEATER' && !AI_ONLY_FIELD_KEYS.has(field.key);
+    });
+  });
+});
+
+// Derive display metadata (field counts) directly from the schemas above so it can never drift
+const countFields = (schema) => schema.sections.reduce((sum, sec) => sum + sec.fields.length, 0);
+
+export const SCHEMA_DETAILS = {
   [PAGE_TYPES.UNIVERSITY]: {
     id: PAGE_TYPES.UNIVERSITY,
     title: 'University Page',
-    sections: [
-      {
-        id: 'uni_basic_info',
-        title: 'Basic Info',
-        icon: 'Info',
-        fields: [
-          { key: 'university_name', type: 'TEXT_INPUT', label: 'University Name', placeholder: 'e.g. NMIMS', required: true },
-          { key: 'university_full_name', type: 'TEXT_INPUT', label: 'University Full Name', placeholder: 'e.g. Narsee Monjee Institute...' },
-          { key: 'location', type: 'TEXT_INPUT', label: 'Location', placeholder: 'e.g. Mumbai, Maharashtra', required: true },
-          { key: 'university_type', type: 'TEXT_INPUT', label: 'University Type', placeholder: 'e.g. Deemed-to-be University' },
-          { key: 'established_year', type: 'TEXT_INPUT', label: 'Established Year', placeholder: 'e.g. 1981' },
-          { 
-            key: 'badges', 
-            type: 'BADGE_SELECTOR', 
-            label: 'Badges', 
-            options: ["UGC Approved", "NAAC A++", "NAAC A+", "DEB Approved", "100% Online", "Working Professionals", "AIU Member"] 
-          }
-        ]
-      },
-      {
-        id: 'uni_hero_details',
-        title: 'Hero details',
-        icon: 'BarChart3',
-        fields: [
-          { key: 'hero_title', type: 'TEXT_INPUT', label: 'Hero Title', placeholder: 'e.g. NMIMS Distance Learning Programs', required: true },
-          { key: 'hero_description', type: 'TEXTAREA', label: 'Hero Short Description', placeholder: 'A short description of the university', required: true, rows: 3 }
-        ]
-      },
-      {
-        id: 'uni_about',
-        title: 'About the University',
-        icon: 'GraduationCap',
-        fields: [
-          { key: 'about_content', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Detailed content about the university', required: true },
-          { key: 'key_highlights', type: 'LIST_BUILDER', label: 'Key Highlights', placeholder: 'e.g. Ranked Top 10 by NIRF', required: true }
-        ]
-      },
-      {
-        id: 'uni_rankings',
-        title: 'Rankings & Accreditations',
-        icon: 'Award',
-        fields: [
-          { key: 'rankings_table', type: 'TABLE_BUILDER', label: 'Rankings', columns: ['agency', 'rank', 'year'], required: true }
-        ]
-      },
-      {
-        id: 'uni_faqs',
-        title: 'FAQs',
-        icon: 'HelpCircle',
-        fields: [
-          { key: 'faqs', type: 'FAQ_BUILDER', label: 'Frequently Asked Questions', required: true }
-        ]
-      }
-    ]
+    fieldCount: countFields(schemas[PAGE_TYPES.UNIVERSITY]),
+    estimatedTime: '35 mins'
   },
-
   [PAGE_TYPES.COURSE]: {
     id: PAGE_TYPES.COURSE,
     title: 'Course Page',
-    sections: [
-      {
-        id: 'course_basic_info',
-        title: 'Basic Info',
-        icon: 'Info',
-        fields: [
-          { key: 'course_name', type: 'TEXT_INPUT', label: 'Course Name', placeholder: 'e.g. MBA in General Management', required: true },
-          { key: 'university_name', type: 'TEXT_INPUT', label: 'University Name', placeholder: 'e.g. NMIMS', required: true },
-          { key: 'course_duration', type: 'TEXT_INPUT', label: 'Course Duration', placeholder: 'e.g. 2 Years', required: true },
-          { key: 'degree_level', type: 'TEXT_INPUT', label: 'Degree Level (UG/PG)', placeholder: 'e.g. Post Graduate', required: true },
-          { 
-            key: 'badges', 
-            type: 'BADGE_SELECTOR', 
-            label: 'Badges', 
-            options: ["UGC Approved", "NAAC A++", "NAAC A+", "100% Online", "2 Years", "Working Professionals"] 
-          }
-        ]
-      },
-      {
-        id: 'course_hero_details',
-        title: 'Hero details',
-        icon: 'BarChart3',
-        fields: [
-          { key: 'hero_description', type: 'TEXTAREA', label: 'Hero Short Description', placeholder: 'A short description of the course', required: true, rows: 3 }
-        ]
-      },
-      {
-        id: 'course_about',
-        title: 'About the Course',
-        icon: 'GraduationCap',
-        fields: [
-          { key: 'about_course', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Detailed content about the course', required: true },
-          { key: 'key_benefits', type: 'LIST_BUILDER', label: 'Key Benefits', placeholder: 'e.g. Comprehensive industry aligned syllabus', required: true }
-        ]
-      },
-      {
-        id: 'course_eligibility',
-        title: 'Eligibility Criteria',
-        icon: 'CheckSquare',
-        fields: [
-          { key: 'eligibility_criteria', type: 'TEXTAREA', label: 'Eligibility Requirements', placeholder: 'e.g. Graduation from a recognized board', required: true, rows: 3 }
-        ]
-      },
-      {
-        id: 'course_syllabus',
-        title: 'Syllabus',
-        icon: 'BookOpen',
-        fields: [
-          { key: 'subjects_list', type: 'LIST_BUILDER', label: 'Core Subjects List', placeholder: 'e.g. Financial Accounting', required: true }
-        ]
-      },
-      {
-        id: 'course_fees',
-        title: 'Fees',
-        icon: 'CreditCard',
-        fields: [
-          { key: 'total_fees', type: 'TEXT_INPUT', label: 'Total Fees', placeholder: 'e.g. ₹1.5L', required: true },
-          { key: 'semester_fee', type: 'TEXT_INPUT', label: 'Semester Fee', placeholder: 'e.g. ₹35,000' }
-        ]
-      },
-      {
-        id: 'course_faqs',
-        title: 'FAQs',
-        icon: 'HelpCircle',
-        fields: [
-          { key: 'faqs', type: 'FAQ_BUILDER', label: 'Frequently Asked Questions', required: true }
-        ]
-      }
-    ]
+    fieldCount: countFields(schemas[PAGE_TYPES.COURSE]),
+    estimatedTime: '35 mins'
+  },
+  [PAGE_TYPES.SPECIALIZATION]: {
+    id: PAGE_TYPES.SPECIALIZATION,
+    title: 'Specialization Page',
+    fieldCount: countFields(schemas[PAGE_TYPES.SPECIALIZATION]),
+    estimatedTime: '35 mins'
   }
 };
 
@@ -359,311 +560,92 @@ export const getInitialState = (pageType) => {
 
   schema.sections.forEach(section => {
     section.fields.forEach(field => {
-      if (field.type === 'BADGE_SELECTOR') {
-        state[field.key] = [];
-      } else if (field.type === 'LIST_BUILDER') {
-        state[field.key] = [];
-      } else if (field.type === 'TABLE_BUILDER') {
-        state[field.key] = [];
-      } else if (field.type === 'FAQ_BUILDER') {
-        state[field.key] = [];
-      } else if (field.type === 'REVIEW_BUILDER') {
-        state[field.key] = [];
-      } else if (field.type === 'STEP_BUILDER') {
-        state[field.key] = [];
-      } else {
-        state[field.key] = '';
-      }
+      state[field.key] = field.type === 'REPEATER' ? [] : '';
     });
   });
 
   return state;
 };
 
-// Transforms the state into the strict WP ACF JSON payload format
+// Returns true if a repeater row has at least one non-empty sub-field
+const isRowFilled = (row) => Object.values(row || {}).some(v => v !== undefined && String(v).trim() !== '');
+
+// Cleans a repeater array down to non-empty rows, normalized to the sub-field keys
+const cleanRepeater = (rows = [], subfields) => {
+  return rows
+    .filter(isRowFilled)
+    .map(row => {
+      const cleaned = {};
+      subfields.forEach(sf => {
+        cleaned[sf.key] = row[sf.key] || '';
+      });
+      return cleaned;
+    });
+};
+
+// Strips tags rather than exact-matching a specific empty serialization like '<p></p>' — TipTap
+// can produce other blank forms (e.g. '<p></p><p></p>' from multiple empty lines, or '<p><br></p>')
+// that an exact string match would miss, silently treating a visually-blank field as "already
+// filled" (this exact helper is reused server-side by batchGenerate.js's onlyEmpty filter).
+export const isRichTextEmpty = (val) => {
+  if (!val) return true;
+  const textOnly = val.replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim();
+  return textOnly === '';
+};
+
+// Transforms the state into the flat ACF-matching JSON payload (field keys match the WP ACF config exactly)
 export const transformToACF = (state, pageType) => {
-  if (pageType !== PAGE_TYPES.SPECIALIZATION) {
-    // Basic mapping for University/Course without strict custom mappings
-    const output = { page_type: pageType };
-    
-    Object.keys(state).forEach(key => {
-      if (key === 'page_type') return;
-      const val = state[key];
-      // Clean table builders to not output empty rows
-      if (Array.isArray(val)) {
-        if (val.length > 0 && typeof val[0] === 'object' && !Array.isArray(val[0])) {
-          // Table or FAQ or Review
-          const filtered = val.filter(row => {
-            return Object.values(row).some(v => v !== undefined && String(v).trim() !== '');
-          });
-          output[key] = filtered;
-        } else {
-          output[key] = val.filter(v => v !== undefined && String(v).trim() !== '');
-        }
+  const schema = schemas[pageType];
+  if (!schema) return {};
+
+  const output = {};
+
+  schema.sections.forEach(section => {
+    section.fields.forEach(field => {
+      if (field.type === 'REPEATER') {
+        output[field.key] = cleanRepeater(state[field.key], field.subfields);
       } else {
-        output[key] = val;
+        output[field.key] = state[field.key] || '';
       }
     });
-    return output;
-  }
+  });
 
-  // Strict Specialization transformation
-  const output = {
-    page_type: PAGE_TYPES.SPECIALIZATION,
-    spec_name: state.spec_name || '',
-    university_name: state.university_name || '',
-    university_full_name: state.university_full_name || '',
-    spec_tag_label: state.spec_tag_label || '',
-    hero_description: state.hero_description || '',
-    badges: state.badges || [],
-    
-    stat_best_price: state.stat_best_price || '',
-    stat_duration: state.stat_duration || '',
-    stat_faculty: state.stat_faculty || '',
-    stat_hiring_firms: state.stat_hiring_firms || '',
-    stat_top_salary: state.stat_top_salary || '',
-    
-    spec_about: state.spec_about || '',
-    fact_duration: state.fact_duration || '',
-    fact_validity: state.fact_validity || '',
-    fact_faculty_count: state.fact_faculty_count || '',
-    pros_list: (state.pros_list || []).filter(item => String(item).trim() !== ''),
-    
-    course_facts: (state.course_facts || []).filter(item => String(item).trim() !== ''),
-    
-    eligibility_education: state.eligibility_education || '',
-    eligibility_marks: state.eligibility_marks || '',
-    admission_fee_note: state.admission_fee_note || '',
-    
-    fee_semester_amount: state.fee_semester_amount || '',
-    fee_semester_total: state.fee_semester_total || '',
-    fee_annual_amount: state.fee_annual_amount || '',
-    fee_annual_total: state.fee_annual_total || '',
-    fee_onetime_amount: state.fee_onetime_amount || '',
-    fee_savings_note: state.fee_savings_note || '',
-    
-    emi_starting_amount: state.emi_starting_amount || '',
-    emi_tenures: (state.emi_tenures || []).filter(item => String(item).trim() !== ''),
-    emi_highlighted_tenure: state.emi_highlighted_tenure || '',
-    emi_partner_banks: (state.emi_partner_banks || []).filter(item => String(item).trim() !== ''),
-    scholarship_note: state.scholarship_note || '',
-    
-    // Table builder: skip empty rows
-    specialization_fees: (state.specialization_fees || [])
-      .filter(row => row.specialization?.trim() || row.fee_per_semester?.trim())
-      .map(row => ({
-        specialization: row.specialization || '',
-        fee_per_semester: row.fee_per_semester || ''
-      })),
-      
-    // Nested syllabus transformation
-    syllabus: {
-      "Year I": {
-        "Semester I": (state.syllabus_y1_s1 || []).filter(item => String(item).trim() !== ''),
-        "Semester II": (state.syllabus_y1_s2 || []).filter(item => String(item).trim() !== '')
-      },
-      "Year II": {
-        "Semester III": (state.syllabus_y2_s3 || []).filter(item => String(item).trim() !== ''),
-        "Semester IV": (state.syllabus_y2_s4 || []).filter(item => String(item).trim() !== '')
-      }
-    },
-    
-    exam_pattern: state.exam_pattern || '',
-    
-    // Step builder output: convert to HTML ordered list
-    admission_process: (() => {
-      const steps = (state.admission_process || []).filter(step => String(step).trim() !== '');
-      if (steps.length === 0) return '';
-      return `<ol>${steps.map(step => `<li>${step}</li>`).join('')}</ol>`;
-    })(),
-    
-    // Combined placements stats array
-    placement_stats: [
-      { value: state.placement_stat_1_value || '', label: state.placement_stat_1_label || '' },
-      { value: state.placement_stat_2_value || '', label: state.placement_stat_2_label || '' },
-      { value: state.placement_stat_3_value || '', label: state.placement_stat_3_label || '' }
-    ].filter(stat => stat.value.trim() || stat.label.trim()),
-    
-    placement_partners: (state.placement_partners || []).filter(item => String(item).trim() !== ''),
-    
-    // Table builder: skip empty rows
-    job_roles: (state.job_roles || [])
-      .filter(row => row.job_profile?.trim() || row.average_salary?.trim())
-      .map(row => ({
-        job_profile: row.job_profile || '',
-        average_salary: row.average_salary || ''
-      })),
-      
-    reviews: (state.reviews || [])
-      .filter(r => r.review?.trim() || r.author?.trim())
-      .map(r => ({
-        review: r.review || '',
-        author: r.author || ''
-      })),
-      
-    faqs: (state.faqs || [])
-      .filter(f => f.question?.trim() || f.answer?.trim())
-      .map(f => ({
-        question: f.question || '',
-        answer: f.answer || ''
-      }))
-  };
-  
   return output;
+};
+
+// Checks whether a single field satisfies its "required" rule
+const fieldPasses = (state, field) => {
+  if (field.type === 'REPEATER') {
+    const rows = (state[field.key] || []).filter(isRowFilled);
+    return rows.length >= (field.minItems || 1);
+  }
+  if (field.type === 'RICH_TEXT') {
+    return !isRichTextEmpty(state[field.key]);
+  }
+  return !!state[field.key] && String(state[field.key]).trim() !== '';
 };
 
 // Validates the state and returns an object: { isValid: boolean, errors: string[], invalidFields: Record<string, boolean> }
 export const validateState = (state, pageType) => {
+  const schema = schemas[pageType];
   const errors = [];
   const invalidFields = {};
+  if (!schema) return { isValid: true, errors, invalidFields };
 
-  const markInvalid = (fieldKey) => {
-    invalidFields[fieldKey] = true;
-  };
-
-  if (pageType !== PAGE_TYPES.SPECIALIZATION) {
-    // Simple validation for course and university
-    const schema = schemas[pageType];
-    schema.sections.forEach(sec => {
-      sec.fields.forEach(f => {
-        if (f.required) {
-          const val = state[f.key];
-          if (!val || (Array.isArray(val) && val.length === 0)) {
-            errors.push(`"${f.label}" is required.`);
-            markInvalid(f.key);
-          }
+  schema.sections.forEach(sec => {
+    sec.fields.forEach(field => {
+      if (!field.required) return;
+      if (!fieldPasses(state, field)) {
+        invalidFields[field.key] = true;
+        if (field.type === 'REPEATER') {
+          const count = (state[field.key] || []).filter(isRowFilled).length;
+          errors.push(`"${field.label}" requires at least ${field.minItems || 1} item(s), found ${count} (${sec.title}).`);
+        } else {
+          errors.push(`"${field.label}" is required (${sec.title}).`);
         }
-      });
+      }
     });
-    return {
-      isValid: errors.length === 0,
-      errors,
-      invalidFields
-    };
-  }
-
-  // Strict validation rules for Specialization page
-  
-  // spec_name
-  if (!state.spec_name || state.spec_name.trim() === '') {
-    errors.push('Specialization Name is required (Section 1).');
-    markInvalid('spec_name');
-  }
-
-  // university_name
-  if (!state.university_name || state.university_name.trim() === '') {
-    errors.push('University Name is required (Section 1).');
-    markInvalid('university_name');
-  }
-
-  // hero_description
-  if (!state.hero_description || state.hero_description.trim() === '') {
-    errors.push('Hero Short Description is required (Section 1).');
-    markInvalid('hero_description');
-  }
-
-  // spec_about
-  if (!state.spec_about || state.spec_about.trim() === '' || state.spec_about === '<p></p>') {
-    errors.push('About Content (Rich Text) is required (Section 3).');
-    markInvalid('spec_about');
-  }
-
-  // pros_list (min 2 items)
-  const pros = (state.pros_list || []).filter(item => String(item).trim() !== '');
-  if (pros.length < 2) {
-    errors.push(`Key Advantages requires at least 2 items, found ${pros.length} (Section 3).`);
-    markInvalid('pros_list');
-  }
-
-  // course_facts (min 2 items)
-  const facts = (state.course_facts || []).filter(item => String(item).trim() !== '');
-  if (facts.length < 2) {
-    errors.push(`Program Highlight Points requires at least 2 items, found ${facts.length} (Section 4).`);
-    markInvalid('course_facts');
-  }
-
-  // eligibility_education
-  if (!state.eligibility_education || state.eligibility_education.trim() === '') {
-    errors.push('Education Qualification is required (Section 5).');
-    markInvalid('eligibility_education');
-  }
-
-  // fee_onetime_amount
-  if (!state.fee_onetime_amount || state.fee_onetime_amount.trim() === '') {
-    errors.push('One-Time Payment Amount (Best Value) is required (Section 6).');
-    markInvalid('fee_onetime_amount');
-  }
-
-  // emi_starting_amount
-  if (!state.emi_starting_amount || state.emi_starting_amount.trim() === '') {
-    errors.push('EMI Starting From is required (Section 7).');
-    markInvalid('emi_starting_amount');
-  }
-
-  // specialization_fees (min 2 rows)
-  const specFees = (state.specialization_fees || []).filter(row => row.specialization?.trim() || row.fee_per_semester?.trim());
-  if (specFees.length < 2) {
-    errors.push(`Other Specializations & Fees Table requires at least 2 valid rows, found ${specFees.length} (Section 8).`);
-    markInvalid('specialization_fees');
-  }
-
-  // syllabus (all 4 semesters have at least 3 subjects)
-  const y1s1 = (state.syllabus_y1_s1 || []).filter(item => String(item).trim() !== '');
-  const y1s2 = (state.syllabus_y1_s2 || []).filter(item => String(item).trim() !== '');
-  const y2s3 = (state.syllabus_y2_s3 || []).filter(item => String(item).trim() !== '');
-  const y2s4 = (state.syllabus_y2_s4 || []).filter(item => String(item).trim() !== '');
-
-  if (y1s1.length < 3) {
-    errors.push(`Year 1 — Semester 1 requires at least 3 subjects, found ${y1s1.length} (Section 9).`);
-    markInvalid('syllabus_y1_s1');
-  }
-  if (y1s2.length < 3) {
-    errors.push(`Year 1 — Semester 2 requires at least 3 subjects, found ${y1s2.length} (Section 9).`);
-    markInvalid('syllabus_y1_s2');
-  }
-  if (y2s3.length < 3) {
-    errors.push(`Year 2 — Semester 3 requires at least 3 subjects, found ${y2s3.length} (Section 9).`);
-    markInvalid('syllabus_y2_s3');
-  }
-  if (y2s4.length < 3) {
-    errors.push(`Year 2 — Semester 4 requires at least 3 subjects, found ${y2s4.length} (Section 9).`);
-    markInvalid('syllabus_y2_s4');
-  }
-
-  // admission_process (min 3 steps)
-  const steps = (state.admission_process || []).filter(item => String(item).trim() !== '');
-  if (steps.length < 3) {
-    errors.push(`Admission Steps requires at least 3 steps, found ${steps.length} (Section 11).`);
-    markInvalid('admission_process');
-  }
-
-  // placement_partners (min 3 items)
-  const partners = (state.placement_partners || []).filter(item => String(item).trim() !== '');
-  if (partners.length < 3) {
-    errors.push(`Top Hiring Partners requires at least 3 items, found ${partners.length} (Section 12).`);
-    markInvalid('placement_partners');
-  }
-
-  // job_roles (min 3 rows)
-  const jobRoles = (state.job_roles || []).filter(row => row.job_profile?.trim() || row.average_salary?.trim());
-  if (jobRoles.length < 3) {
-    errors.push(`Job Roles & Salaries Table requires at least 3 valid rows, found ${jobRoles.length} (Section 13).`);
-    markInvalid('job_roles');
-  }
-
-  // reviews (min 2 reviews)
-  const reviews = (state.reviews || []).filter(r => r.review?.trim() || r.author?.trim());
-  if (reviews.length < 2) {
-    errors.push(`Student Reviews requires at least 2 reviews, found ${reviews.length} (Section 15).`);
-    markInvalid('reviews');
-  }
-
-  // faqs (min 3 FAQs)
-  const faqs = (state.faqs || []).filter(f => f.question?.trim() || f.answer?.trim());
-  if (faqs.length < 3) {
-    errors.push(`FAQs requires at least 3 questions, found ${faqs.length} (Section 16).`);
-    markInvalid('faqs');
-  }
+  });
 
   return {
     isValid: errors.length === 0,
@@ -672,159 +654,84 @@ export const validateState = (state, pageType) => {
   };
 };
 
-// Computes the completion percentage of required fields
-export const calculateProgress = (state, pageType) => {
-  if (pageType !== PAGE_TYPES.SPECIALIZATION) {
-    const schema = schemas[pageType];
-    if (!schema) return 0;
-    let requiredCount = 0;
-    let filledRequiredCount = 0;
+// Like validateState, but treats every AI-assisted field as irrelevant regardless of its own
+// `required` flag — used to gate the Intern's "Generate All AI Fields" button, which by
+// definition must be clickable before any AI field has content. validateState (used for the
+// final Download/Validate flow) still requires AI fields once they've actually been generated.
+export const validateFactsOnly = (state, pageType) => {
+  const schema = schemas[pageType];
+  const errors = [];
+  const invalidFields = {};
+  if (!schema) return { isValid: true, errors, invalidFields };
 
-    schema.sections.forEach(sec => {
-      sec.fields.forEach(f => {
-        if (f.required) {
-          requiredCount++;
-          const val = state[f.key];
-          if (Array.isArray(val)) {
-            if (val.length > 0) filledRequiredCount++;
-          } else if (val && String(val).trim() !== '') {
-            filledRequiredCount++;
-          }
+  schema.sections.forEach(sec => {
+    sec.fields.forEach(field => {
+      if (!field.required || field.aiAssist) return;
+      if (!fieldPasses(state, field)) {
+        invalidFields[field.key] = true;
+        if (field.type === 'REPEATER') {
+          const count = (state[field.key] || []).filter(isRowFilled).length;
+          errors.push(`"${field.label}" requires at least ${field.minItems || 1} item(s), found ${count} (${sec.title}).`);
+        } else {
+          errors.push(`"${field.label}" is required (${sec.title}).`);
         }
-      });
+      }
     });
+  });
 
-    if (requiredCount === 0) return 100;
-    return Math.round((filledRequiredCount / requiredCount) * 100);
-  }
-
-  // Specialization custom progress calculation
-  // List of required rules:
-  // 1. spec_name: text filled
-  // 2. university_name: text filled
-  // 3. hero_description: text filled
-  // 4. spec_about: rich text filled
-  // 5. pros_list: >= 2 items
-  // 6. course_facts: >= 2 items
-  // 7. eligibility_education: text filled
-  // 8. fee_onetime_amount: text filled
-  // 9. emi_starting_amount: text filled
-  // 10. specialization_fees: >= 2 rows
-  // 11-14. syllabus: y1s1 >= 3, y1s2 >= 3, y2s3 >= 3, y2s4 >= 3
-  // 15. admission_process: >= 3 steps
-  // 16. placement_partners: >= 3 items
-  // 17. job_roles: >= 3 rows
-  // 18. reviews: >= 2 reviews
-  // 19. faqs: >= 3 faqs
-
-  const checks = [
-    { key: 'spec_name', check: () => !!state.spec_name && state.spec_name.trim() !== '' },
-    { key: 'university_name', check: () => !!state.university_name && state.university_name.trim() !== '' },
-    { key: 'hero_description', check: () => !!state.hero_description && state.hero_description.trim() !== '' },
-    { key: 'spec_about', check: () => !!state.spec_about && state.spec_about.trim() !== '' && state.spec_about !== '<p></p>' },
-    { key: 'pros_list', check: () => (state.pros_list || []).filter(i => String(i).trim() !== '').length >= 2 },
-    { key: 'course_facts', check: () => (state.course_facts || []).filter(i => String(i).trim() !== '').length >= 2 },
-    { key: 'eligibility_education', check: () => !!state.eligibility_education && state.eligibility_education.trim() !== '' },
-    { key: 'fee_onetime_amount', check: () => !!state.fee_onetime_amount && state.fee_onetime_amount.trim() !== '' },
-    { key: 'emi_starting_amount', check: () => !!state.emi_starting_amount && state.emi_starting_amount.trim() !== '' },
-    { key: 'specialization_fees', check: () => (state.specialization_fees || []).filter(r => r.specialization?.trim() || r.fee_per_semester?.trim()).length >= 2 },
-    { key: 'syllabus_y1_s1', check: () => (state.syllabus_y1_s1 || []).filter(i => String(i).trim() !== '').length >= 3 },
-    { key: 'syllabus_y1_s2', check: () => (state.syllabus_y1_s2 || []).filter(i => String(i).trim() !== '').length >= 3 },
-    { key: 'syllabus_y2_s3', check: () => (state.syllabus_y2_s3 || []).filter(i => String(i).trim() !== '').length >= 3 },
-    { key: 'syllabus_y2_s4', check: () => (state.syllabus_y2_s4 || []).filter(i => String(i).trim() !== '').length >= 3 },
-    { key: 'admission_process', check: () => (state.admission_process || []).filter(i => String(i).trim() !== '').length >= 3 },
-    { key: 'placement_partners', check: () => (state.placement_partners || []).filter(i => String(i).trim() !== '').length >= 3 },
-    { key: 'job_roles', check: () => (state.job_roles || []).filter(r => r.job_profile?.trim() || r.average_salary?.trim()).length >= 3 },
-    { key: 'reviews', check: () => (state.reviews || []).filter(r => r.review?.trim() || r.author?.trim()).length >= 2 },
-    { key: 'faqs', check: () => (state.faqs || []).filter(f => f.question?.trim() || f.answer?.trim()).length >= 3 }
-  ];
-
-  const total = checks.length;
-  const passed = checks.filter(c => c.check()).length;
-
-  return Math.round((passed / total) * 100);
+  return {
+    isValid: errors.length === 0,
+    errors,
+    invalidFields
+  };
 };
 
-// Gets the completion state of a section: 'empty' | 'partial' | 'complete'
-export const getSectionStatus = (state, section, pageType) => {
+// Computes the completion percentage of required fields. `isFieldRelevant` (defaults to counting
+// everything) lets a caller exclude fields the current viewer has no say over right now — e.g. an
+// Intern's AI-generated fields, which stay empty until generation and aren't theirs to fill —
+// so "100%" means "done with what's actually mine to do" rather than "the whole document exists."
+export const calculateProgress = (state, pageType, isFieldRelevant = () => true) => {
+  const schema = schemas[pageType];
+  if (!schema) return 0;
+
+  let requiredCount = 0;
+  let passedCount = 0;
+
+  schema.sections.forEach(sec => {
+    sec.fields.forEach(field => {
+      if (!field.required || !isFieldRelevant(field)) return;
+      requiredCount++;
+      if (fieldPasses(state, field)) passedCount++;
+    });
+  });
+
+  if (requiredCount === 0) return 100;
+  return Math.round((passedCount / requiredCount) * 100);
+};
+
+// Gets the completion state of a section: 'empty' | 'partial' | 'complete'. Same `isFieldRelevant`
+// convention as calculateProgress above.
+export const getSectionStatus = (state, section, isFieldRelevant = () => true) => {
   let hasAnyFilled = false;
   let hasAllRequiredFilled = true;
   let requiredCount = 0;
 
-  if (pageType === PAGE_TYPES.SPECIALIZATION) {
-    // Custom check per section to match exact rules
-    const fieldKeys = section.fields.map(f => f.key);
-    
-    // We check individual fields in this section
-    section.fields.forEach(f => {
-      const val = state[f.key];
-      let isFieldFilled = false;
-
-      if (Array.isArray(val)) {
-        isFieldFilled = val.filter(i => {
-          if (typeof i === 'object') {
-            return Object.values(i).some(v => v && String(v).trim() !== '');
-          }
-          return String(i).trim() !== '';
-        }).length > 0;
-      } else {
-        isFieldFilled = val && String(val).trim() !== '' && val !== '<p></p>';
-      }
-
-      if (isFieldFilled) {
-        hasAnyFilled = true;
-      }
-
-      // Check if it's required and meets rule
-      if (f.required) {
-        requiredCount++;
-        let meetsRule = false;
-        
-        if (f.key === 'pros_list') {
-          meetsRule = (state.pros_list || []).filter(i => String(i).trim() !== '').length >= 2;
-        } else if (f.key === 'course_facts') {
-          meetsRule = (state.course_facts || []).filter(i => String(i).trim() !== '').length >= 2;
-        } else if (f.key === 'specialization_fees') {
-          meetsRule = (state.specialization_fees || []).filter(r => r.specialization?.trim() || r.fee_per_semester?.trim()).length >= 2;
-        } else if (f.key === 'syllabus_y1_s1' || f.key === 'syllabus_y1_s2' || f.key === 'syllabus_y2_s3' || f.key === 'syllabus_y2_s4') {
-          meetsRule = (state[f.key] || []).filter(i => String(i).trim() !== '').length >= 3;
-        } else if (f.key === 'admission_process') {
-          meetsRule = (state.admission_process || []).filter(i => String(i).trim() !== '').length >= 3;
-        } else if (f.key === 'placement_partners') {
-          meetsRule = (state.placement_partners || []).filter(i => String(i).trim() !== '').length >= 3;
-        } else if (f.key === 'job_roles') {
-          meetsRule = (state.job_roles || []).filter(r => r.job_profile?.trim() || r.average_salary?.trim()).length >= 3;
-        } else if (f.key === 'reviews') {
-          meetsRule = (state.reviews || []).filter(r => r.review?.trim() || r.author?.trim()).length >= 2;
-        } else if (f.key === 'faqs') {
-          meetsRule = (state.faqs || []).filter(f => f.question?.trim() || f.answer?.trim()).length >= 3;
-        } else {
-          meetsRule = isFieldFilled;
-        }
-
-        if (!meetsRule) {
-          hasAllRequiredFilled = false;
-        }
-      }
-    });
-
-    if (requiredCount === 0) {
-      // If no required fields, and any is filled, it is complete. If none is filled, it is empty.
-      return hasAnyFilled ? 'complete' : 'empty';
+  section.fields.forEach(field => {
+    const val = state[field.key];
+    let isFilled;
+    if (field.type === 'REPEATER') {
+      isFilled = (val || []).some(isRowFilled);
+    } else if (field.type === 'RICH_TEXT') {
+      isFilled = !isRichTextEmpty(val);
+    } else {
+      isFilled = !!val && String(val).trim() !== '';
     }
 
-    if (!hasAnyFilled) return 'empty';
-    return hasAllRequiredFilled ? 'complete' : 'partial';
-  }
-
-  // Standard calculation for other page types
-  section.fields.forEach(f => {
-    const val = state[f.key];
-    const isFilled = Array.isArray(val) ? val.length > 0 : (val && String(val).trim() !== '');
     if (isFilled) hasAnyFilled = true;
-    if (f.required) {
+
+    if (field.required && isFieldRelevant(field)) {
       requiredCount++;
-      if (!isFilled) hasAllRequiredFilled = false;
+      if (!fieldPasses(state, field)) hasAllRequiredFilled = false;
     }
   });
 

@@ -1,0 +1,11 @@
+const Database = require('better-sqlite3');
+const db = new Database('server/data/content_studio.sqlite');
+const row = db.prepare('SELECT form_data_json FROM drafts WHERE id = ?').get('draft_1784021234239');
+const data = JSON.parse(row.form_data_json);
+data.university_full_name = 'Phase 2 Test University Full Name';
+data.facts = [{item:'Fact one'},{item:'Fact two'}];
+data.accreditations = [{item:'NAAC A+'}];
+data.reviews = [{item:'Great university'},{item:'Loved it here'}];
+data.faqs = [{item:'Q1'},{item:'Q2'},{item:'Q3'}];
+db.prepare("UPDATE drafts SET form_data_json = ?, updated_at = datetime('now') WHERE id = ?").run(JSON.stringify(data), 'draft_1784021234239');
+console.log('updated');

@@ -2,17 +2,44 @@
 
 @theme {
   --font-sans: "Poppins", sans-serif;
-  
+
+  /* Brand */
   --color-navy: #0E1F3D;
-  --color-navy-hover: #1E3A60;
-  --color-orange: #E84010;
-  --color-orange-hover: #F2572D;
+  --color-navy-hover: #16294A;
+  --color-navy-deep: #081428;
+  --color-navy-soft: #E8ECF4;
+
+  --color-orange: #E8590C;
+  --color-orange-hover: #F1701F;
+  --color-orange-soft: #FDECE0;
+
+  /* Semantic states — kept distinct from brand-orange so "primary action" and "something is
+     wrong" never share a color (previously orange did both, which read as an error even when
+     nothing was wrong). */
+  --color-danger: #DC2626;
+  --color-danger-hover: #B91C1C;
+  --color-danger-soft: #FCEAEA;
+
+  --color-green-success: #15803D;
+  --color-green-soft: #E7F5EC;
+
+  --color-info: #2563EB;
+  --color-info-soft: #E9F0FE;
+
+  /* Admin's review stage and badge — distinct from Senior's --color-info so the workflow's third
+     stage reads as its own thing rather than a shade of "senior review." */
+  --color-purple-review: #7C3AED;
+  --color-purple-review-soft: #F1E9FE;
+
+  /* Neutrals */
   --color-off: #F7F8FA;
+  --color-border: #E4E7EE;
+  --color-border-strong: #D3D8E2;
   --color-muted: #6B7280;
-  --color-green-success: #16A34A;
-  
-  --shadow-premium: 0 10px 30px -10px rgba(14, 31, 61, 0.08), 0 1px 3px rgba(0, 0, 0, 0.02);
-  --shadow-premium-hover: 0 20px 40px -15px rgba(14, 31, 61, 0.15), 0 2px 5px rgba(0, 0, 0, 0.03);
+
+  --shadow-premium: 0 10px 30px -10px rgba(14, 31, 61, 0.08), 0 1px 3px rgba(0, 0, 0, 0.03);
+  --shadow-premium-hover: 0 22px 44px -16px rgba(14, 31, 61, 0.18), 0 3px 8px rgba(0, 0, 0, 0.04);
+  --shadow-soft: 0 1px 2px rgba(14, 31, 61, 0.04), 0 1px 1px rgba(14, 31, 61, 0.03);
 }
 
 * {
@@ -80,9 +107,24 @@ body {
 }
 
 .ProseMirror a {
-  color: #E84010;
+  color: #E8590C;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.ProseMirror.ProseMirror-focused {
+  outline: none;
+}
+
+/* @tiptap/extension-placeholder renders the hint via this pseudo-element on the empty paragraph
+   (its own convention, not something this app invents) — matches TextInput/TextArea's placeholder
+   styling so RichText fields no longer look mute compared to every other field type. */
+.ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  height: 0;
+  pointer-events: none;
+  color: #9CA3AF;
 }
 
 /* Hide scrollbars for iframe or clean UI if needed */
@@ -92,4 +134,34 @@ body {
 .no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Slim, unobtrusive scrollbar for the panels that do want visible scroll affordance
+   (sidebar nav, JSON slide-over, modals) — the default browser scrollbar looks out of
+   place against this app's otherwise custom-styled surfaces. */
+.styled-scrollbar::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.styled-scrollbar::-webkit-scrollbar-track {
+  background: transparent;
+}
+.styled-scrollbar::-webkit-scrollbar-thumb {
+  background-color: rgba(14, 31, 61, 0.15);
+  border-radius: 8px;
+}
+.styled-scrollbar::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(14, 31, 61, 0.28);
+}
+.styled-scrollbar {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(14, 31, 61, 0.15) transparent;
+}
+
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.animate-toast-in {
+  animation: toast-in 0.2s ease-out;
 }
