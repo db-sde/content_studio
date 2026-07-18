@@ -2,6 +2,6 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/(.*)", "destination": "https://REPLACE-WITH-YOUR-RENDER-URL.onrender.com/api/$1" }
+    { "source": "/api/(.*)", "destination": "https://content-studio-6t5i.onrender.com/api/$1" }
   ]
 }
