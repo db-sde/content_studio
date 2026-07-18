@@ -78,6 +78,21 @@ const DRAFT_STATUS_TABLE_STYLES = {
   approved: 'bg-green-soft text-green-success'
 };
 
+// Which quick status-change actions an Admin can fire directly from the Saved Drafts list
+// (via the status chip), keyed by the draft's *current* status — mirrors exactly what the
+// server's STATUS_ACTIONS already allows an admin to do, just surfaced without opening the
+// draft. senior_review has no entry: an Admin has no status-changing action available at that
+// stage (only the Senior can send it onward), so the chip is a plain non-interactive badge there.
+const ADMIN_STATUS_CHIP_ACTIONS = {
+  intern_editing: [{ action: 'send-to-senior', label: 'Send to Senior' }],
+  admin_review: [
+    { action: 'approve', label: 'Approve' },
+    { action: 'revert-to-senior', label: 'Revert to Senior' },
+    { action: 'revert-to-intern', label: 'Revert to Intern' }
+  ],
+  approved: [{ action: 'reopen', label: 'Reopen' }]
+};
+
 // Groups a section's fields into alternating "grid" runs (consecutive short TEXT_INPUT fields,
 // packed 2-3 per row) and "single" full-width fields (textarea/rich text/repeater) — pure
 // presentation, doesn't touch the schema or field order.
@@ -259,6 +274,9 @@ function ContentStudioApp() {
   // mass-publish several drafts at once instead of opening each one individually.
   const [selectedDraftIds, setSelectedDraftIds] = useState(new Set());
   const [isBulkActing, setIsBulkActing] = useState(false);
+  // Which single draft's status chip dropdown is open (only one at a time) — the status badge
+  // itself becomes the quick-action control for an Admin, rather than a separate button.
+  const [statusChipOpenFor, setStatusChipOpenFor] = useState(null);
   const [showBulkPasteModal, setShowBulkPasteModal] = useState(false);
   const [bulkPasteResult, setBulkPasteResult] = useState(null);
   const [activeSectionId, setActiveSectionId] = useState(null);
@@ -803,19 +821,34 @@ function ContentStudioApp() {
     }
   };
 
-  // Quick-approve straight from the Saved Drafts list, no need to open the draft first — the
-  // server still enforces the same admin_review + complete-fields rules as the in-draft Approve
-  // button, so this can't approve anything the full flow wouldn't have allowed anyway.
-  const handleQuickApprove = async (draftId, e) => {
+  // Fires any status-changing action straight from the Saved Drafts list's status chip, no need
+  // to open the draft first — the server still enforces the exact same STATUS_ACTIONS rules
+  // (role/from-status eligibility, complete-fields-required for approve) as the in-draft buttons,
+  // so this can't do anything the full flow wouldn't have allowed anyway.
+  const handleQuickStatusAction = async (draftId, action, e) => {
     e.stopPropagation();
+    setStatusChipOpenFor(null);
     try {
-      await draftsClient.approveDraft(draftId);
-      toast.success('Draft approved.');
+      await draftsClient.setDraftStatus(draftId, action);
+      toast.success('Status updated.');
       refreshDraftsList();
     } catch (err) {
-      toast.error(err.message || 'Failed to approve draft');
+      toast.error(err.message || 'Failed to update status');
     }
   };
+
+  // Closes whichever status chip dropdown is open on any click outside it — only attached while
+  // one is actually open, same pattern as SearchableSelect's own outside-click handling. Must
+  // check containment (not just "any mousedown") or a mousedown on a dropdown action button would
+  // close the dropdown — unmounting that button — before its own click handler ever fires.
+  useEffect(() => {
+    if (!statusChipOpenFor) return;
+    const handleClickOutside = (e) => {
+      if (!e.target.closest('[data-status-chip-root]')) setStatusChipOpenFor(null);
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [statusChipOpenFor]);
 
   const toggleDraftSelected = (draftId, e) => {
     e.stopPropagation();
@@ -1675,9 +1708,43 @@ function ContentStudioApp() {
                             </td>
                             <td className="py-4 px-4 font-medium text-muted">{getDraftListTitle(draft)}</td>
                             <td className="py-4 px-4">
-                              <span className={`inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${DRAFT_STATUS_TABLE_STYLES[draft.status] || DRAFT_STATUS_TABLE_STYLES.intern_editing}`}>
-                                {DRAFT_STATUS_LABELS[draft.status] || DRAFT_STATUS_LABELS.intern_editing}
-                              </span>
+                              {currentUser.role === 'admin' ? (
+                                (() => {
+                                  const chipActions = ADMIN_STATUS_CHIP_ACTIONS[draft.status] || [];
+                                  return (
+                                    <div className="relative inline-block" data-status-chip-root onClick={(e) => e.stopPropagation()}>
+                                      <button
+                                        type="button"
+                                        onClick={() => chipActions.length && setStatusChipOpenFor(statusChipOpenFor === draft.id ? null : draft.id)}
+                                        disabled={!chipActions.length}
+                                        title={chipActions.length ? 'Change status' : 'No status action available while a Senior has this draft'}
+                                        className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full transition-all ${DRAFT_STATUS_TABLE_STYLES[draft.status] || DRAFT_STATUS_TABLE_STYLES.intern_editing} ${chipActions.length ? 'cursor-pointer hover:brightness-95' : 'cursor-default opacity-80'}`}
+                                      >
+                                        {DRAFT_STATUS_LABELS[draft.status] || DRAFT_STATUS_LABELS.intern_editing}
+                                        {chipActions.length > 0 && <ChevronDown className="w-2.5 h-2.5" />}
+                                      </button>
+                                      {statusChipOpenFor === draft.id && chipActions.length > 0 && (
+                                        <div className="absolute top-full left-0 mt-1 bg-white border border-border rounded-lg shadow-premium-hover z-20 overflow-hidden min-w-[150px]">
+                                          {chipActions.map(a => (
+                                            <button
+                                              key={a.action}
+                                              type="button"
+                                              onClick={(e) => handleQuickStatusAction(draft.id, a.action, e)}
+                                              className="block w-full text-left px-3 py-2 text-xs font-semibold text-navy hover:bg-off transition-colors"
+                                            >
+                                              {a.label}
+                                            </button>
+                                          ))}
+                                        </div>
+                                      )}
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                <span className={`inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${DRAFT_STATUS_TABLE_STYLES[draft.status] || DRAFT_STATUS_TABLE_STYLES.intern_editing}`}>
+                                  {DRAFT_STATUS_LABELS[draft.status] || DRAFT_STATUS_LABELS.intern_editing}
+                                </span>
+                              )}
                               {draft.wordpress_url && (
                                 <a
                                   href={draft.wordpress_url}
@@ -1697,15 +1764,6 @@ function ContentStudioApp() {
                             </td>
                             <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-end gap-2">
-                                {currentUser.role === 'admin' && draft.status === 'admin_review' && (
-                                  <button
-                                    onClick={(e) => handleQuickApprove(draft.id, e)}
-                                    className="text-xs bg-green-success text-white hover:brightness-110 font-semibold px-3 py-1.5 rounded transition-all"
-                                    title="Approve without opening this draft"
-                                  >
-                                    Approve
-                                  </button>
-                                )}
                                 <button
                                   onClick={() => loadDraft(draft)}
                                   className="text-xs bg-navy text-white hover:bg-navy-hover font-semibold px-3 py-1.5 rounded transition-all"
