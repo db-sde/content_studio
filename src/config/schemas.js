@@ -32,6 +32,34 @@ const HIGHLIGHTS_SUBFIELDS = [
   { key: 'highlight_description', label: 'Highlight Description', type: 'text', placeholder: 'e.g. Designed with input from 50+ hiring partners' }
 ];
 
+// Concrete step-by-step facts behind the AI-generated "Admission Steps" narrative — without this,
+// the AI has no real process to describe and has to invent a generic one from scratch.
+const ADMISSION_STEPS_SUBFIELDS = [
+  { key: 'step_title', label: 'Step Title', type: 'text', placeholder: 'e.g. Submit Online Application' },
+  { key: 'step_description', label: 'Step Description', type: 'textarea', placeholder: 'e.g. Fill the online application form with personal and academic details' }
+];
+
+// Real placement numbers behind the AI-generated "Placement Content" narrative — that field's own
+// instructions already warn "do not invent statistics," but without this there was nothing for
+// the AI to cite, so it either invented numbers anyway or wrote around them vaguely.
+const PLACEMENT_STATS_SUBFIELDS = [
+  { key: 'stat_label', label: 'Stat Label', type: 'text', placeholder: 'e.g. Average Package' },
+  { key: 'stat_value', label: 'Stat Value', type: 'text', placeholder: 'e.g. ₹8 LPA' }
+];
+
+// Real exam format facts behind the AI-generated "Examination Content" narrative.
+const EXAM_DETAILS_SUBFIELDS = [
+  { key: 'detail_label', label: 'Detail Label', type: 'text', placeholder: 'e.g. Exam Mode' },
+  { key: 'detail_value', label: 'Detail Value', type: 'text', placeholder: 'e.g. Online, Proctored' }
+];
+
+// Real partner-bank EMI terms behind the AI-generated "EMI Content" narrative (University only —
+// course/specialization only ever show a plain emi_amount fact with no AI narrative around it).
+const EMI_PARTNERS_SUBFIELDS = [
+  { key: 'bank_name', label: 'Bank / Partner Name', type: 'text', placeholder: 'e.g. HDFC Bank' },
+  { key: 'emi_terms', label: 'EMI Terms', type: 'text', placeholder: 'e.g. 0% interest, up to 12 months' }
+];
+
 export const schemas = {
   [PAGE_TYPES.UNIVERSITY]: {
     id: PAGE_TYPES.UNIVERSITY,
@@ -116,6 +144,7 @@ export const schemas = {
         icon: 'UserCheck',
         fields: [
           { key: 'admission_heading', type: 'TEXT_INPUT', label: 'Admission Section Heading', placeholder: 'e.g. Admission Process' },
+          { key: 'admission_steps_list', type: 'REPEATER', label: 'Admission Steps List', subfields: ADMISSION_STEPS_SUBFIELDS },
           { key: 'admission_steps', type: 'RICH_TEXT', label: 'Admission Steps', placeholder: 'Describe the admission process, steps can be an ordered list', aiAssist: { instructions: 'Describe the admission process as a short ordered sequence of steps a prospective student needs to follow.' } },
           { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
         ]
@@ -126,6 +155,7 @@ export const schemas = {
         icon: 'Landmark',
         fields: [
           { key: 'emi_heading', type: 'TEXT_INPUT', label: 'EMI Section Heading', placeholder: 'e.g. EMI Options' },
+          { key: 'emi_partners', type: 'REPEATER', label: 'EMI Partners', subfields: EMI_PARTNERS_SUBFIELDS },
           { key: 'emi_content', type: 'RICH_TEXT', label: 'EMI Content', placeholder: 'Describe EMI plans and partner banks', aiAssist: { instructions: 'Explain the EMI options and partner banks available for fee payment, in plain reassuring terms, grounded only in the facts provided.' } }
         ]
       },
@@ -135,6 +165,7 @@ export const schemas = {
         icon: 'FileText',
         fields: [
           { key: 'exam_heading', type: 'TEXT_INPUT', label: 'Examination Section Heading', placeholder: 'e.g. Examination Pattern' },
+          { key: 'exam_details', type: 'REPEATER', label: 'Exam Details', subfields: EXAM_DETAILS_SUBFIELDS },
           { key: 'exam_content', type: 'RICH_TEXT', label: 'Examination Content', placeholder: 'Describe the examination pattern', aiAssist: { instructions: 'Describe the examination pattern and format students can expect, grounded only in the facts provided.' } }
         ]
       },
@@ -159,6 +190,7 @@ export const schemas = {
         icon: 'BarChart3',
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
+          { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
@@ -280,6 +312,7 @@ export const schemas = {
         icon: 'UserCheck',
         fields: [
           { key: 'admission_heading', type: 'TEXT_INPUT', label: 'Admission Section Heading', placeholder: 'e.g. Admission Process' },
+          { key: 'admission_steps_list', type: 'REPEATER', label: 'Admission Steps List', subfields: ADMISSION_STEPS_SUBFIELDS },
           { key: 'admission_steps', type: 'RICH_TEXT', label: 'Admission Steps', placeholder: 'Describe the admission process', aiAssist: { instructions: 'Describe the admission process as a short ordered sequence of steps a prospective student needs to follow.' } },
           { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
         ]
@@ -303,6 +336,7 @@ export const schemas = {
         icon: 'BarChart3',
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
+          { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
@@ -445,6 +479,7 @@ export const schemas = {
         icon: 'FileText',
         fields: [
           { key: 'exam_heading', type: 'TEXT_INPUT', label: 'Examination Section Heading', placeholder: 'e.g. Examination Pattern' },
+          { key: 'exam_details', type: 'REPEATER', label: 'Exam Details', subfields: EXAM_DETAILS_SUBFIELDS },
           { key: 'exam_content', type: 'RICH_TEXT', label: 'Examination Content', placeholder: 'Describe the examination pattern', aiAssist: { instructions: 'Describe the examination pattern and format students can expect, grounded only in the facts provided.' } }
         ]
       },
@@ -454,6 +489,7 @@ export const schemas = {
         icon: 'UserCheck',
         fields: [
           { key: 'admission_heading', type: 'TEXT_INPUT', label: 'Admission Section Heading', placeholder: 'e.g. Admission Process' },
+          { key: 'admission_steps_list', type: 'REPEATER', label: 'Admission Steps List', subfields: ADMISSION_STEPS_SUBFIELDS },
           { key: 'admission_steps', type: 'RICH_TEXT', label: 'Admission Steps', placeholder: 'Describe the admission process', required: true, aiAssist: { instructions: 'Describe the admission process as a short ordered sequence of steps a prospective student needs to follow.' } },
           { key: 'admission_fee_note', type: 'TEXT_INPUT', label: 'Admission Fee Note', placeholder: 'e.g. ₹1,200/- one-time non-refundable' }
         ]
@@ -464,6 +500,7 @@ export const schemas = {
         icon: 'BarChart3',
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
+          { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
