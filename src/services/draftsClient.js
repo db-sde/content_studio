@@ -94,6 +94,12 @@ export function reopenDraft(id) {
   return setDraftStatus(id, 'reopen');
 }
 
+// Admin-only override: jump a draft directly to any of the 4 statuses regardless of where it
+// currently is, bypassing the normal Intern -> Senior -> Admin chain.
+export function adminSetDraftStatus(id, targetStatus, message) {
+  return patchJSON(`/api/drafts/${id}/status`, { action: 'admin-set-status', targetStatus, message });
+}
+
 export function setAllowInternAiEdit(id, allow) {
   return patchJSON(`/api/drafts/${id}/allow-intern-ai-edit`, { allow: !!allow });
 }

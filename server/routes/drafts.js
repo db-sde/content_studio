@@ -26,6 +26,36 @@ const TITLE_FIELD_BY_PAGE_TYPE = {
   specialization: 'spec_name'
 };
 
+const DRAFT_STATUSES = ['intern_editing', 'senior_review', 'admin_review', 'approved'];
+
+// Notification to raise when an Admin force-sets a draft directly to this status via the
+// 'admin-set-status' override below (bypassing the normal named hand-off actions) — same
+// recipient logic as the closest-matching named action, so the affected role still finds out even
+// when the Admin skipped the usual path to get there. No entry for 'admin_review'/'approved': the
+// Admin doing this already knows (nothing to notify about their own action), and nothing "sent" a
+// draft to Approved in the hand-off sense.
+const ADMIN_OVERRIDE_NOTIFY = {
+  intern_editing: (draft) => ({ type: 'reverted_to_intern', recipientUserId: draft.created_by_user_id }),
+  senior_review: () => ({ type: 'reverted_to_senior', recipientRole: 'senior' })
+};
+
+// Applied after ANY transition (a named STATUS_ACTIONS entry or the Admin override) that lands a
+// university/course draft on 'approved' — feeds the searchable Linked University/Linked Course
+// dropdowns. Idempotent (ON CONFLICT DO UPDATE), so re-running it for an already-approved draft
+// just refreshes the same row rather than duplicating it.
+async function upsertDirectoryIfApproved(draft, updated) {
+  if (updated.status !== 'approved') return;
+  const titleField = TITLE_FIELD_BY_PAGE_TYPE[draft.page_type];
+  if (!titleField || !['university', 'course'].includes(draft.page_type)) return;
+  const displayName = updated.form_data[titleField];
+  if (!displayName) return;
+  // A course's own university_name disambiguates it from a same-named course at a different
+  // university (e.g. two universities both approved as "MBA in Finance") — null for universities,
+  // which have nothing above them to disambiguate against.
+  const secondaryLabel = draft.page_type === 'course' ? (updated.form_data.university_name || null) : null;
+  await upsertDirectoryEntry({ draftId: draft.id, pageType: draft.page_type, displayName, secondaryLabel });
+}
+
 function notFound() {
   const err = new Error('Draft not found'); err.status = 404; return err;
 }
@@ -234,9 +264,57 @@ const STATUS_ACTIONS = {
 draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
   const draft = await loadDraftOr404(req.params.id);
   const { action, message } = req.body || {};
+
+  // Admin override: jump a draft directly to any of the 4 statuses regardless of where it
+  // currently is, bypassing the normal Intern -> Senior -> Admin chain — the Admin is the final
+  // authority and may need to fix a misrouted draft without forcing it back through every
+  // intermediate stage. The one check that's never skipped: moving TO 'approved' still requires
+  // every required field to be complete, the same guarantee the named 'approve' action provides,
+  // so this can't be used to accidentally mark an incomplete draft as done.
+  if (action === 'admin-set-status') {
+    if (req.currentUser.role !== 'admin') {
+      const err = new Error('Only an admin can directly set a draft\'s status'); err.status = 403; throw err;
+    }
+    const { targetStatus } = req.body || {};
+    if (!DRAFT_STATUSES.includes(targetStatus)) {
+      const err = new Error(`targetStatus must be one of: ${DRAFT_STATUSES.join(', ')}`); err.status = 400; throw err;
+    }
+    if (targetStatus === draft.status) {
+      const err = new Error('This draft is already in that status'); err.status = 409; throw err;
+    }
+    if (targetStatus === 'approved' && !validateState(draft.form_data, draft.page_type).isValid) {
+      const err = new Error('This draft still has required fields missing'); err.status = 409; throw err;
+    }
+
+    await updateDraftStatus(req.params.id, targetStatus);
+    // Landing back on Intern or Senior is a "bounce back" needing attention out of order, same as
+    // the named revert-to-* actions; landing on Admin Review or Approved is the Admin's own
+    // forward decision, so it drops back into normal chronological order like the named
+    // send-to-* actions do.
+    const updated = await setDraftPriority(req.params.id, ['intern_editing', 'senior_review'].includes(targetStatus));
+
+    await upsertDirectoryIfApproved(draft, updated);
+
+    const notifyFn = ADMIN_OVERRIDE_NOTIFY[targetStatus];
+    if (notifyFn) {
+      const { type, recipientRole, recipientUserId } = notifyFn(draft);
+      await createNotification({
+        draftId: draft.id,
+        type,
+        message: message ? String(message).slice(0, 2000) : null,
+        createdByUserId: req.currentUser.id,
+        recipientRole,
+        recipientUserId
+      });
+    }
+
+    res.json({ draft: updated });
+    return;
+  }
+
   const spec = STATUS_ACTIONS[action];
   if (!spec) {
-    const err = new Error(`action must be one of: ${Object.keys(STATUS_ACTIONS).join(', ')}`); err.status = 400; throw err;
+    const err = new Error(`action must be one of: ${Object.keys(STATUS_ACTIONS).join(', ')}, admin-set-status`); err.status = 400; throw err;
   }
   const permitted = spec.allowed.some(a => a.role === req.currentUser.role && a.from === draft.status);
   if (!permitted) {
@@ -251,21 +329,7 @@ draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
   if (spec.priority === 'set') updated = await setDraftPriority(req.params.id, true);
   else if (spec.priority === 'clear') updated = await setDraftPriority(req.params.id, false);
 
-  // Approving a university/course is what feeds the searchable Linked University/Linked Course
-  // dropdowns on other pages — specializations aren't tracked here since nothing links to one by
-  // name. Keyed by draft_id (see directoryRepo.upsertDirectoryEntry) so a later re-approval after
-  // Reopen -> edit -> re-approve refreshes this same entry rather than duplicating it.
-  const titleField = TITLE_FIELD_BY_PAGE_TYPE[draft.page_type];
-  if (action === 'approve' && titleField && ['university', 'course'].includes(draft.page_type)) {
-    const displayName = updated.form_data[titleField];
-    if (displayName) {
-      // A course's own university_name disambiguates it from a same-named course at a different
-      // university (e.g. two universities both approved as "MBA in Finance") — null for
-      // universities, which have nothing above them to disambiguate against.
-      const secondaryLabel = draft.page_type === 'course' ? (updated.form_data.university_name || null) : null;
-      await upsertDirectoryEntry({ draftId: draft.id, pageType: draft.page_type, displayName, secondaryLabel });
-    }
-  }
+  await upsertDirectoryIfApproved(draft, updated);
 
   if (spec.notify) {
     const { type, recipientRole, recipientUserId } = spec.notify(draft);

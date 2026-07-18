@@ -78,20 +78,10 @@ const DRAFT_STATUS_TABLE_STYLES = {
   approved: 'bg-green-soft text-green-success'
 };
 
-// Which quick status-change actions an Admin can fire directly from the Saved Drafts list
-// (via the status chip), keyed by the draft's *current* status — mirrors exactly what the
-// server's STATUS_ACTIONS already allows an admin to do, just surfaced without opening the
-// draft. senior_review has no entry: an Admin has no status-changing action available at that
-// stage (only the Senior can send it onward), so the chip is a plain non-interactive badge there.
-const ADMIN_STATUS_CHIP_ACTIONS = {
-  intern_editing: [{ action: 'send-to-senior', label: 'Send to Senior' }],
-  admin_review: [
-    { action: 'approve', label: 'Approve' },
-    { action: 'revert-to-senior', label: 'Revert to Senior' },
-    { action: 'revert-to-intern', label: 'Revert to Intern' }
-  ],
-  approved: [{ action: 'reopen', label: 'Reopen' }]
-};
+// Every status a draft can be in — the Admin's status chip lists all of these (minus whichever
+// one the draft is already in) as direct jump targets via the 'admin-set-status' override, not
+// just whatever the normal Intern -> Senior -> Admin chain would allow next.
+const ALL_DRAFT_STATUSES = ['intern_editing', 'senior_review', 'admin_review', 'approved'];
 
 // Groups a section's fields into alternating "grid" runs (consecutive short TEXT_INPUT fields,
 // packed 2-3 per row) and "single" full-width fields (textarea/rich text/repeater) — pure
@@ -277,6 +267,8 @@ function ContentStudioApp() {
   // Which single draft's status chip dropdown is open (only one at a time) — the status badge
   // itself becomes the quick-action control for an Admin, rather than a separate button.
   const [statusChipOpenFor, setStatusChipOpenFor] = useState(null);
+  // Saved Drafts list filter, available to all three roles — 'all' or one of ALL_DRAFT_STATUSES.
+  const [draftsStatusFilter, setDraftsStatusFilter] = useState('all');
   const [showBulkPasteModal, setShowBulkPasteModal] = useState(false);
   const [bulkPasteResult, setBulkPasteResult] = useState(null);
   const [activeSectionId, setActiveSectionId] = useState(null);
@@ -821,15 +813,15 @@ function ContentStudioApp() {
     }
   };
 
-  // Fires any status-changing action straight from the Saved Drafts list's status chip, no need
-  // to open the draft first — the server still enforces the exact same STATUS_ACTIONS rules
-  // (role/from-status eligibility, complete-fields-required for approve) as the in-draft buttons,
-  // so this can't do anything the full flow wouldn't have allowed anyway.
-  const handleQuickStatusAction = async (draftId, action, e) => {
+  // Fires the Admin's direct status-jump straight from the Saved Drafts list's status chip, no
+  // need to open the draft first — the server still enforces the one safety check that matters
+  // (every required field must be complete before landing on 'approved'), so this can't be used
+  // to mark an incomplete draft as done, but every other jump is unrestricted for an Admin.
+  const handleAdminSetStatus = async (draftId, targetStatus, e) => {
     e.stopPropagation();
     setStatusChipOpenFor(null);
     try {
-      await draftsClient.setDraftStatus(draftId, action);
+      await draftsClient.adminSetDraftStatus(draftId, targetStatus);
       toast.success('Status updated.');
       refreshDraftsList();
     } catch (err) {
@@ -859,8 +851,11 @@ function ContentStudioApp() {
     });
   };
 
-  const toggleSelectAllDrafts = () => {
-    setSelectedDraftIds(prev => (prev.size === drafts.length ? new Set() : new Set(drafts.map(d => d.id))));
+  // Selects/deselects all *currently visible* drafts (respecting the status filter) rather than
+  // every draft ever — selecting all while filtered to "Admin Review" shouldn't silently also
+  // select unrelated Intern Editing drafts the user can't even see right now.
+  const toggleSelectAllDrafts = (visibleDrafts) => {
+    setSelectedDraftIds(prev => (prev.size === visibleDrafts.length ? new Set() : new Set(visibleDrafts.map(d => d.id))));
   };
 
   // Shared by both bulk actions below — only ever calls the action on drafts whose current status
@@ -1597,7 +1592,13 @@ function ContentStudioApp() {
           ) : (
             <div className="max-w-6xl w-full mx-auto px-6 py-10">
               <div className="bg-white border border-border rounded-2xl p-6 shadow-premium">
-                <div className="flex justify-between items-center mb-6 border-b border-border pb-4">
+                {(() => {
+                  const filteredDrafts = draftsStatusFilter === 'all'
+                    ? drafts
+                    : drafts.filter(d => d.status === draftsStatusFilter);
+                  return (
+                <>
+                <div className="flex justify-between items-center mb-4 border-b border-border pb-4">
                   <h2 className="text-lg font-bold text-navy flex items-center gap-2 uppercase tracking-wide">
                     <History className="w-5 h-5 text-orange" />
                     Saved Drafts
@@ -1641,18 +1642,54 @@ function ContentStudioApp() {
                   </div>
                 </div>
 
-                {drafts.length === 0 ? (
+                {/* Status filter — available to all three roles, so an Intern/Senior/Admin can
+                    each narrow the list down to just the stage they care about. */}
+                {drafts.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 mb-5">
+                    {['all', ...ALL_DRAFT_STATUSES].map(s => {
+                      const count = s === 'all' ? drafts.length : drafts.filter(d => d.status === s).length;
+                      const active = draftsStatusFilter === s;
+                      return (
+                        <button
+                          key={s}
+                          onClick={() => setDraftsStatusFilter(s)}
+                          className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all ${
+                            active ? 'bg-navy text-white' : 'bg-off text-muted hover:text-navy hover:bg-navy-soft'
+                          }`}
+                        >
+                          {s === 'all' ? 'All' : DRAFT_STATUS_LABELS[s]} ({count})
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {filteredDrafts.length === 0 ? (
                   <div className="py-16 text-center">
                     <div className="w-12 h-12 rounded-full bg-navy-soft flex items-center justify-center mx-auto mb-3">
                       <History className="w-5 h-5 text-navy/50" />
                     </div>
-                    <p className="text-sm text-navy font-semibold">No saved drafts yet</p>
-                    <button
-                      onClick={() => setHomeTab('create')}
-                      className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
-                    >
-                      Pick a template to start writing →
-                    </button>
+                    {drafts.length === 0 ? (
+                      <>
+                        <p className="text-sm text-navy font-semibold">No saved drafts yet</p>
+                        <button
+                          onClick={() => setHomeTab('create')}
+                          className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
+                        >
+                          Pick a template to start writing →
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm text-navy font-semibold">No drafts with this status</p>
+                        <button
+                          onClick={() => setDraftsStatusFilter('all')}
+                          className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
+                        >
+                          Clear filter →
+                        </button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -1663,8 +1700,8 @@ function ContentStudioApp() {
                             <th className="py-3 px-4 w-8">
                               <input
                                 type="checkbox"
-                                checked={drafts.length > 0 && selectedDraftIds.size === drafts.length}
-                                onChange={toggleSelectAllDrafts}
+                                checked={filteredDrafts.length > 0 && selectedDraftIds.size === filteredDrafts.length}
+                                onChange={() => toggleSelectAllDrafts(filteredDrafts)}
                                 className="rounded border-border-strong cursor-pointer"
                                 title="Select all"
                               />
@@ -1679,7 +1716,7 @@ function ContentStudioApp() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
-                        {drafts.map(draft => (
+                        {filteredDrafts.map(draft => (
                           <tr
                             key={draft.id}
                             onClick={() => loadDraft(draft)}
@@ -1710,29 +1747,28 @@ function ContentStudioApp() {
                             <td className="py-4 px-4">
                               {currentUser.role === 'admin' ? (
                                 (() => {
-                                  const chipActions = ADMIN_STATUS_CHIP_ACTIONS[draft.status] || [];
+                                  const otherStatuses = ALL_DRAFT_STATUSES.filter(s => s !== draft.status);
                                   return (
                                     <div className="relative inline-block" data-status-chip-root onClick={(e) => e.stopPropagation()}>
                                       <button
                                         type="button"
-                                        onClick={() => chipActions.length && setStatusChipOpenFor(statusChipOpenFor === draft.id ? null : draft.id)}
-                                        disabled={!chipActions.length}
-                                        title={chipActions.length ? 'Change status' : 'No status action available while a Senior has this draft'}
-                                        className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full transition-all ${DRAFT_STATUS_TABLE_STYLES[draft.status] || DRAFT_STATUS_TABLE_STYLES.intern_editing} ${chipActions.length ? 'cursor-pointer hover:brightness-95' : 'cursor-default opacity-80'}`}
+                                        onClick={() => setStatusChipOpenFor(statusChipOpenFor === draft.id ? null : draft.id)}
+                                        title="Change status"
+                                        className={`inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full transition-all cursor-pointer hover:brightness-95 ${DRAFT_STATUS_TABLE_STYLES[draft.status] || DRAFT_STATUS_TABLE_STYLES.intern_editing}`}
                                       >
                                         {DRAFT_STATUS_LABELS[draft.status] || DRAFT_STATUS_LABELS.intern_editing}
-                                        {chipActions.length > 0 && <ChevronDown className="w-2.5 h-2.5" />}
+                                        <ChevronDown className="w-2.5 h-2.5" />
                                       </button>
-                                      {statusChipOpenFor === draft.id && chipActions.length > 0 && (
+                                      {statusChipOpenFor === draft.id && (
                                         <div className="absolute top-full left-0 mt-1 bg-white border border-border rounded-lg shadow-premium-hover z-20 overflow-hidden min-w-[150px]">
-                                          {chipActions.map(a => (
+                                          {otherStatuses.map(s => (
                                             <button
-                                              key={a.action}
+                                              key={s}
                                               type="button"
-                                              onClick={(e) => handleQuickStatusAction(draft.id, a.action, e)}
+                                              onClick={(e) => handleAdminSetStatus(draft.id, s, e)}
                                               className="block w-full text-left px-3 py-2 text-xs font-semibold text-navy hover:bg-off transition-colors"
                                             >
-                                              {a.label}
+                                              {DRAFT_STATUS_LABELS[s]}
                                             </button>
                                           ))}
                                         </div>
@@ -1785,6 +1821,9 @@ function ContentStudioApp() {
                     </table>
                   </div>
                 )}
+                </>
+                  );
+                })()}
               </div>
             </div>
           )}
