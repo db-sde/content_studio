@@ -17,15 +17,27 @@ function getCookie(req, name) {
   return null;
 }
 
+// A cross-origin deployment (frontend on Vercel, backend on Render) means the browser sees every
+// API call as cross-site — SameSite=Lax cookies are never sent on cross-site fetch/XHR (only on
+// top-level navigations), so the session cookie would silently stop working the moment frontend
+// and backend live on different domains. SameSite=None is required for that, which browsers only
+// honor alongside Secure — tying both to config.cookieSecure keeps local HTTP dev on the current
+// Lax/no-Secure behavior (an HTTPS-only Secure cookie would just get dropped over plain HTTP).
+function cookieAttributes() {
+  const secure = config.cookieSecure ? '; Secure' : '';
+  const sameSite = config.cookieSecure ? 'None' : 'Lax';
+  return { secure, sameSite };
+}
+
 export function setSessionCookie(res, token) {
   const maxAgeMs = config.sessionTtlHours * 60 * 60 * 1000;
-  const secure = config.cookieSecure ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(maxAgeMs / 1000)}${secure}`);
+  const { secure, sameSite } = cookieAttributes();
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=${sameSite}; Max-Age=${Math.floor(maxAgeMs / 1000)}${secure}`);
 }
 
 export function clearSessionCookie(res) {
-  const secure = config.cookieSecure ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
+  const { secure, sameSite } = cookieAttributes();
+  res.setHeader('Set-Cookie', `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=${sameSite}; Max-Age=0${secure}`);
 }
 
 export function getSessionTokenFromRequest(req) {

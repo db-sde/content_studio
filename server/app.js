@@ -11,13 +11,20 @@ import { costsRouter } from './routes/costs.js';
 import { directoryRouter } from './routes/directory.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireAuth } from './middleware/auth.js';
+import { config } from './config.js';
 
 // Express app factory (kept separate from index.js/boot sequence so it's importable in tests
 // without opening a real port or DB connection).
 export function createApp() {
   const app = express();
 
-  app.use(cors());
+  // credentials: true is required for the session cookie to cross an actual origin boundary
+  // (frontend on Vercel, backend on Render) — without it the browser drops Set-Cookie/Cookie on
+  // any cross-origin request regardless of `credentials: 'include'` in the frontend's fetch calls.
+  // Reflecting the request origin (rather than a bare `cors()`, which sends a literal `*` that
+  // browsers refuse to pair with credentials) when FRONTEND_URL isn't set keeps local dev working
+  // zero-config — set FRONTEND_URL in production to lock this down to the real deployed frontend.
+  app.use(cors({ origin: config.frontendUrl || true, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
 
   app.get('/api/health', (req, res) => {

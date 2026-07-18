@@ -5,6 +5,11 @@ export const config = {
   // Neon (hosted Postgres) connection string, e.g. postgres://user:pass@ep-xxx.neon.tech/dbname?sslmode=require
   databaseUrl: process.env.DATABASE_URL || '',
 
+  // Deployed frontend origin (e.g. https://your-app.vercel.app) — used only for the CORS
+  // allowlist below. Unset in local dev on purpose: the Vite proxy already makes frontend/backend
+  // requests same-origin from the browser's point of view, so CORS never actually applies there.
+  frontendUrl: process.env.FRONTEND_URL || '',
+
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
   // Used only for short, mechanical fields (SEO title/meta description) — not long-form narrative
