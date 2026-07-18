@@ -255,6 +255,10 @@ function ContentStudioApp() {
   const [copiedIndicator, setCopiedIndicator] = useState(false);
   const [showBanner, setShowBanner] = useState(false);
   const [latestDraft, setLatestDraft] = useState(null);
+  // Admin-only bulk selection on the Saved Drafts list — lets a trusting Admin mass-approve or
+  // mass-publish several drafts at once instead of opening each one individually.
+  const [selectedDraftIds, setSelectedDraftIds] = useState(new Set());
+  const [isBulkActing, setIsBulkActing] = useState(false);
   const [showBulkPasteModal, setShowBulkPasteModal] = useState(false);
   const [bulkPasteResult, setBulkPasteResult] = useState(null);
   const [activeSectionId, setActiveSectionId] = useState(null);
@@ -798,6 +802,68 @@ function ContentStudioApp() {
       setIsPublishing(false);
     }
   };
+
+  // Quick-approve straight from the Saved Drafts list, no need to open the draft first — the
+  // server still enforces the same admin_review + complete-fields rules as the in-draft Approve
+  // button, so this can't approve anything the full flow wouldn't have allowed anyway.
+  const handleQuickApprove = async (draftId, e) => {
+    e.stopPropagation();
+    try {
+      await draftsClient.approveDraft(draftId);
+      toast.success('Draft approved.');
+      refreshDraftsList();
+    } catch (err) {
+      toast.error(err.message || 'Failed to approve draft');
+    }
+  };
+
+  const toggleDraftSelected = (draftId, e) => {
+    e.stopPropagation();
+    setSelectedDraftIds(prev => {
+      const next = new Set(prev);
+      if (next.has(draftId)) next.delete(draftId); else next.add(draftId);
+      return next;
+    });
+  };
+
+  const toggleSelectAllDrafts = () => {
+    setSelectedDraftIds(prev => (prev.size === drafts.length ? new Set() : new Set(drafts.map(d => d.id))));
+  };
+
+  // Shared by both bulk actions below — only ever calls the action on drafts whose current status
+  // actually qualifies (mirrors the same requirement the single-draft button enforces), so a
+  // careless "Select All" followed by "Approve Selected" can't fire off a wave of requests that
+  // were only ever going to 403. Per-draft failures beyond that (e.g. WordPress unreachable) are
+  // still tolerated individually rather than aborting the whole batch — same reasoning as
+  // generateAllAiFields's partial-failure handling.
+  const runBulkDraftAction = async (eligibleStatuses, actionFn, actionLabel) => {
+    const selectedIds = [...selectedDraftIds];
+    if (!selectedIds.length || isBulkActing) return;
+
+    const eligibleIds = drafts.filter(d => selectedIds.includes(d.id) && eligibleStatuses.includes(d.status)).map(d => d.id);
+    const skipped = selectedIds.length - eligibleIds.length;
+    if (!eligibleIds.length) {
+      toast.error(`None of the selected drafts are eligible for ${actionLabel.toLowerCase()} right now.`);
+      return;
+    }
+
+    setIsBulkActing(true);
+    const results = await Promise.allSettled(eligibleIds.map(id => actionFn(id)));
+    const succeeded = results.filter(r => r.status === 'fulfilled').length;
+    const failed = results.length - succeeded;
+
+    let message = `${actionLabel}: ${succeeded} succeeded`;
+    if (failed) message += `, ${failed} failed`;
+    if (skipped) message += `, ${skipped} skipped (not eligible)`;
+    (succeeded ? toast.success : toast.error)(`${message}.`);
+
+    setSelectedDraftIds(new Set());
+    setIsBulkActing(false);
+    refreshDraftsList();
+  };
+
+  const handleBulkApprove = () => runBulkDraftAction(['admin_review'], (id) => draftsClient.approveDraft(id), 'Mass approve');
+  const handleBulkPublish = () => runBulkDraftAction(['approved'], (id) => draftsClient.publishToWordPress(id), 'Mass publish');
 
   const handleToggleAllowInternAiEdit = async () => {
     if (!activeDraftId || isTogglingAllowAiEdit) return;
@@ -1503,15 +1569,43 @@ function ContentStudioApp() {
                     <History className="w-5 h-5 text-orange" />
                     Saved Drafts
                   </h2>
-                  {drafts.length > 0 && (
-                    <button
-                      onClick={clearAllDrafts}
-                      className="flex items-center gap-1.5 text-xs text-danger font-semibold hover:text-danger-hover transition-colors"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                      Clear All
-                    </button>
-                  )}
+                  <div className="flex items-center gap-4">
+                    {currentUser.role === 'admin' && selectedDraftIds.size > 0 && (
+                      <div className="flex items-center gap-2 bg-navy-soft px-3 py-1.5 rounded-lg">
+                        <span className="text-xs font-bold text-navy">{selectedDraftIds.size} selected</span>
+                        <button
+                          onClick={handleBulkApprove}
+                          disabled={isBulkActing}
+                          className="text-xs bg-green-success text-white hover:brightness-110 disabled:opacity-50 font-semibold px-3 py-1 rounded transition-all"
+                        >
+                          Approve Selected
+                        </button>
+                        <button
+                          onClick={handleBulkPublish}
+                          disabled={isBulkActing}
+                          className="text-xs bg-orange text-white hover:bg-orange-hover disabled:opacity-50 font-semibold px-3 py-1 rounded transition-all"
+                        >
+                          Publish Selected
+                        </button>
+                        <button
+                          onClick={() => setSelectedDraftIds(new Set())}
+                          disabled={isBulkActing}
+                          className="text-xs text-muted hover:text-navy font-semibold px-1"
+                        >
+                          Clear
+                        </button>
+                      </div>
+                    )}
+                    {drafts.length > 0 && (
+                      <button
+                        onClick={clearAllDrafts}
+                        className="flex items-center gap-1.5 text-xs text-danger font-semibold hover:text-danger-hover transition-colors"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        Clear All
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {drafts.length === 0 ? (
@@ -1532,6 +1626,17 @@ function ContentStudioApp() {
                     <table className="w-full text-left text-sm">
                       <thead>
                         <tr className="border-b border-border text-xs text-muted font-semibold uppercase tracking-wider">
+                          {currentUser.role === 'admin' && (
+                            <th className="py-3 px-4 w-8">
+                              <input
+                                type="checkbox"
+                                checked={drafts.length > 0 && selectedDraftIds.size === drafts.length}
+                                onChange={toggleSelectAllDrafts}
+                                className="rounded border-border-strong cursor-pointer"
+                                title="Select all"
+                              />
+                            </th>
+                          )}
                           <th className="py-3 px-4">University Name</th>
                           <th className="py-3 px-4">Page Type</th>
                           <th className="py-3 px-4">Page/Spec Title</th>
@@ -1547,6 +1652,16 @@ function ContentStudioApp() {
                             onClick={() => loadDraft(draft)}
                             className={`hover:bg-off cursor-pointer transition-colors group ${draft.prioritized_at ? 'bg-orange-soft/40' : ''}`}
                           >
+                            {currentUser.role === 'admin' && (
+                              <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedDraftIds.has(draft.id)}
+                                  onChange={(e) => toggleDraftSelected(draft.id, e)}
+                                  className="rounded border-border-strong cursor-pointer"
+                                />
+                              </td>
+                            )}
                             <td className="py-4 px-4 font-bold text-navy">
                               <span className="flex items-center gap-1.5">
                                 {draft.prioritized_at && <Flame className="w-3.5 h-3.5 text-orange shrink-0" title="Bounced back — needs attention" />}
@@ -1582,6 +1697,15 @@ function ContentStudioApp() {
                             </td>
                             <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-end gap-2">
+                                {currentUser.role === 'admin' && draft.status === 'admin_review' && (
+                                  <button
+                                    onClick={(e) => handleQuickApprove(draft.id, e)}
+                                    className="text-xs bg-green-success text-white hover:brightness-110 font-semibold px-3 py-1.5 rounded transition-all"
+                                    title="Approve without opening this draft"
+                                  >
+                                    Approve
+                                  </button>
+                                )}
                                 <button
                                   onClick={() => loadDraft(draft)}
                                   className="text-xs bg-navy text-white hover:bg-navy-hover font-semibold px-3 py-1.5 rounded transition-all"

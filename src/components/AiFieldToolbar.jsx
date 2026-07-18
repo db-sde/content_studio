@@ -15,6 +15,10 @@ export const AiFieldToolbar = ({ pageType, draftId, fieldKey, fieldLabel, fieldI
   const [errorMsg, setErrorMsg] = useState('');
   const [generationLogId, setGenerationLogId] = useState(null);
   const [styleVersion, setStyleVersion] = useState(null);
+  // Cost of just the generate+evaluate call that produced what's currently in review — not a
+  // running total for the field (that lives in the draft-wide cost summary elsewhere), just what
+  // this specific action cost, shown right where the person who spent it can see it.
+  const [lastCostInr, setLastCostInr] = useState(null);
   const [learnContext, setLearnContext] = useState(null);
   // Set only by handleReject, holding exactly the AI content that was just rejected. Watched by
   // the effect below so a rejection followed by the Senior/Admin hand-writing a replacement still
@@ -62,6 +66,7 @@ export const AiFieldToolbar = ({ pageType, draftId, fieldKey, fieldLabel, fieldI
       setEvaluation(result.evaluation);
       setGenerationLogId(logId);
       setStyleVersion(result.styleVersion);
+      setLastCostInr(result.costInr ?? null);
       setStatus('reviewing');
 
       syncFieldRecord({
@@ -172,6 +177,14 @@ export const AiFieldToolbar = ({ pageType, draftId, fieldKey, fieldLabel, fieldI
               title={evaluation.feedback || ''}
             >
               Editorial Score {evaluation.overall.toFixed(1)}/10
+            </span>
+          )}
+          {lastCostInr != null && (
+            <span
+              className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-orange-soft text-orange"
+              title="Cost of this generate/regenerate call"
+            >
+              ₹{lastCostInr < 1 ? lastCostInr.toFixed(2) : lastCostInr.toFixed(1)}
             </span>
           )}
           <button

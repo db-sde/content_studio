@@ -4,6 +4,7 @@ import * as editor from './editor.js';
 import { getActiveStyle } from './styleEngine.js';
 import { insertGenerationLog } from '../repositories/generationLogsRepo.js';
 import { insertEvaluationLog } from '../repositories/evaluationLogsRepo.js';
+import { computeCostUsd, usdToInr } from './pricing.js';
 
 // Hard-capped flow, per the approved plan:
 //   Claude generate -> GPT evaluate -> (if below threshold) Claude improve -> GPT evaluate -> return
@@ -38,18 +39,26 @@ export async function generateAndEvaluateField(params) {
     inputTokens: eval1.usage?.inputTokens, outputTokens: eval1.usage?.outputTokens
   });
 
+  // Cost of just this generate+evaluate call (not a running total) — shown on the field's own
+  // toolbar card right after a generate/regenerate, so the person who just spent the money sees
+  // it immediately next to the Editorial Score rather than only in the draft-wide total.
+  const costUsd1 = computeCostUsd({ model: attempt1.model, inputTokens: attempt1.usage?.inputTokens, outputTokens: attempt1.usage?.outputTokens })
+    + computeCostUsd({ model: config.openaiModel, inputTokens: eval1.usage?.inputTokens, outputTokens: eval1.usage?.outputTokens });
+
   if (eval1.status === 'errored') {
     // Evaluator unavailable — don't block the user, return Claude's draft ungated with a flag.
     return {
       content: attempt1.output, evaluation: eval1, attemptsUsed: 1, styleVersion: style.version,
-      generationLogIds: [log1Id], evaluationLogIds: [evalLog1Id], evaluationUnavailable: true
+      generationLogIds: [log1Id], evaluationLogIds: [evalLog1Id], evaluationUnavailable: true,
+      costUsd: costUsd1, costInr: usdToInr(costUsd1)
     };
   }
 
   if (eval1.overall >= config.editorialScoreThreshold) {
     return {
       content: attempt1.output, evaluation: eval1, attemptsUsed: 1, styleVersion: style.version,
-      generationLogIds: [log1Id], evaluationLogIds: [evalLog1Id]
+      generationLogIds: [log1Id], evaluationLogIds: [evalLog1Id],
+      costUsd: costUsd1, costInr: usdToInr(costUsd1)
     };
   }
 
@@ -79,11 +88,16 @@ export async function generateAndEvaluateField(params) {
     ? { content: attempt2.output, evaluation: eval2 }
     : { content: attempt1.output, evaluation: eval1 };
 
+  const costUsd2 = costUsd1
+    + computeCostUsd({ model: attempt2.model, inputTokens: attempt2.usage?.inputTokens, outputTokens: attempt2.usage?.outputTokens })
+    + computeCostUsd({ model: config.openaiModel, inputTokens: eval2.usage?.inputTokens, outputTokens: eval2.usage?.outputTokens });
+
   return {
     ...winner,
     attemptsUsed: 2,
     styleVersion: style.version,
     generationLogIds: [log1Id, log2Id],
-    evaluationLogIds: [evalLog1Id, evalLog2Id]
+    evaluationLogIds: [evalLog1Id, evalLog2Id],
+    costUsd: costUsd2, costInr: usdToInr(costUsd2)
   };
 }
