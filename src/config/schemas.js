@@ -290,6 +290,10 @@ export const schemas = {
         icon: 'BookOpen',
         fields: [
           { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
+          { key: 'syllabus_subjects', type: 'REPEATER', label: 'Syllabus Subjects', subfields: [
+            { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester 1' },
+            { key: 'subjects', label: 'Subjects', type: 'textarea', placeholder: 'e.g. Marketing Management, Financial Accounting, Business Statistics' }
+          ] },
           { key: 'syllabus_content', type: 'RICH_TEXT', label: 'Syllabus Content', placeholder: 'Describe the syllabus / subjects', required: true, aiAssist: { instructions: 'Summarize the syllabus/subjects covered in this course, grounded only in the facts provided.' } }
         ]
       },
@@ -402,6 +406,11 @@ export const schemas = {
         icon: 'CreditCard',
         fields: [
           { key: 'fee_heading', type: 'TEXT_INPUT', label: 'Fee Section Heading', placeholder: 'e.g. Fee Structure' },
+          { key: 'fee_plans', type: 'REPEATER', label: 'Fee Plans', subfields: [
+            { key: 'plan_name', label: 'Plan Name', type: 'text', placeholder: 'e.g. Semester Plan' },
+            { key: 'plan_amount', label: 'Plan Amount', type: 'text', placeholder: 'e.g. ₹35,000' },
+            { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
+          ] },
           { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month', required: true }
         ]
       },
@@ -423,6 +432,10 @@ export const schemas = {
         icon: 'BookOpen',
         fields: [
           { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
+          { key: 'syllabus_subjects', type: 'REPEATER', label: 'Syllabus Subjects', subfields: [
+            { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester 1' },
+            { key: 'subjects', label: 'Subjects', type: 'textarea', placeholder: 'e.g. Marketing Management, Financial Accounting, Business Statistics' }
+          ] },
           { key: 'syllabus_content', type: 'RICH_TEXT', label: 'Syllabus Content', placeholder: 'Describe subjects covered per semester', required: true, aiAssist: { instructions: 'Summarize the subjects covered per semester in this specialization, grounded only in the facts provided.' } }
         ]
       },
