@@ -322,14 +322,17 @@ function ContentStudioApp() {
       const { drafts: list } = await draftsClient.listDrafts();
       setDrafts(list);
 
-      if (list.length > 0 && !activePageTypeRef.current) {
+      // Admin sees every draft across every Intern/Senior, so "your unfinished draft" never
+      // actually means the Admin's own work — the resume-prompt only makes sense for the two
+      // roles that actually originate and edit drafts themselves.
+      if (list.length > 0 && !activePageTypeRef.current && currentUser?.role !== 'admin') {
         setLatestDraft(list[0]);
         setShowBanner(true);
       }
     } catch (e) {
       console.error('Error loading drafts', e);
     }
-  }, []);
+  }, [currentUser?.role]);
 
   // Neither role can otherwise tell the other has acted (new draft submitted, sent back with
   // notes, cost accrued) without this app telling them — so the home-screen list, the
