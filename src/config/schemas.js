@@ -87,6 +87,7 @@ export const schemas = {
         icon: 'GraduationCap',
         fields: [
           { key: 'about_heading', type: 'TEXT_INPUT', label: 'About Section Heading', placeholder: 'e.g. About NMIMS' },
+          { key: 'about_additional_notes', type: 'TEXTAREA', label: 'Additional Notes', placeholder: 'Any extra facts about the university not captured elsewhere - the AI will use these when writing About Content', rows: 3 },
           { key: 'about_content', type: 'RICH_TEXT', label: 'About Content', placeholder: 'Detailed content about the university', required: true, aiAssist: { instructions: 'Write 2-3 short paragraphs introducing the university - its history, standing, and what makes it a credible choice for distance/online learners.' } }
         ]
       },
@@ -96,6 +97,7 @@ export const schemas = {
         icon: 'Star',
         fields: [
           { key: 'why_choose_heading', type: 'TEXT_INPUT', label: 'Why Choose Section Heading', placeholder: 'e.g. Why Choose NMIMS' },
+          { key: 'why_choose_additional_notes', type: 'TEXTAREA', label: 'Additional Notes', placeholder: 'Any extra reasons or facts not captured elsewhere - the AI will use these when writing Why Choose Content', rows: 3 },
           { key: 'why_choose_content', type: 'RICH_TEXT', label: 'Why Choose Content', placeholder: 'Reasons to choose this university', aiAssist: { instructions: 'Write a short persuasive passage (2-3 short paragraphs or a tight bulleted list) on why a student should choose this university specifically, grounded only in the facts provided (accreditations, mode, fees, etc.).' } }
         ]
       },
@@ -156,6 +158,7 @@ export const schemas = {
         fields: [
           { key: 'emi_heading', type: 'TEXT_INPUT', label: 'EMI Section Heading', placeholder: 'e.g. EMI Options' },
           { key: 'emi_partners', type: 'REPEATER', label: 'EMI Partners', subfields: EMI_PARTNERS_SUBFIELDS },
+          { key: 'emi_additional_notes', type: 'TEXTAREA', label: 'Additional Notes', placeholder: 'Any extra EMI facts not captured above - the AI will use these when writing EMI Content', rows: 3 },
           { key: 'emi_content', type: 'RICH_TEXT', label: 'EMI Content', placeholder: 'Describe EMI plans and partner banks', aiAssist: { instructions: 'Explain the EMI options and partner banks available for fee payment, in plain reassuring terms, grounded only in the facts provided.' } }
         ]
       },
@@ -191,6 +194,7 @@ export const schemas = {
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
           { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
+          { key: 'placement_additional_notes', type: 'TEXTAREA', label: 'Additional Notes', placeholder: 'Any extra placement facts not captured above - the AI will use these when writing Placement Content', rows: 3 },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
@@ -552,20 +556,25 @@ export const schemas = {
   }
 };
 
-// Every scalar/rich-text field is required by default; SEO fields are the one exception since
-// they're fully AI-generated from the rest of the page's data rather than typed by the writer.
+// Every scalar/rich-text field is required by default; SEO fields are exempt since they're fully
+// AI-generated from the rest of the page's data rather than typed by the writer, and "additional
+// notes" fields are exempt since they exist purely as an optional catch-all for facts that don't
+// fit a structured repeater - forcing them required would defeat that purpose.
 // REPEATER fields (Highlights, Reviews, FAQs, Job Profiles, etc.) are never forced required here:
 // how many of these a real institution/course actually has varies and can legitimately be zero
 // (a brand-new course may have no reviews yet, a university may have no FAQs written), so a
 // blanket minimum count would block otherwise-complete drafts. Applied here (once, on the schema
 // objects themselves) rather than hand-set per field so it can't drift as fields are added, and
 // so the UI (asterisks, "Required Fields" badges) stays in sync for free.
-const AI_ONLY_FIELD_KEYS = new Set(['seo_title', 'meta_description']);
+const OPTIONAL_FIELD_KEYS = new Set([
+  'seo_title', 'meta_description',
+  'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes'
+]);
 
 Object.values(schemas).forEach(schema => {
   schema.sections.forEach(section => {
     section.fields.forEach(field => {
-      field.required = field.type !== 'REPEATER' && !AI_ONLY_FIELD_KEYS.has(field.key);
+      field.required = field.type !== 'REPEATER' && !OPTIONAL_FIELD_KEYS.has(field.key);
     });
   });
 });
