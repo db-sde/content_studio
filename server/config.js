@@ -44,6 +44,14 @@ export const config = {
       course: process.env.WORDPRESS_POST_TYPE_COURSE || 'courses',
       specialization: process.env.WORDPRESS_POST_TYPE_SPECIALIZATION || 'specializations'
     }
+  },
+
+  // The separate Python/FastAPI image-generation service (image_pipeline/) — see
+  // server/integrations/imagePipelineClient.js. The shared key travels server-side only, same
+  // convention as the WordPress app password above; the browser never sees it.
+  imagePipeline: {
+    baseUrl: (process.env.IMAGE_PIPELINE_URL || 'http://localhost:8001').replace(/\/+$/, ''),
+    apiKey: process.env.IMAGE_PIPELINE_API_KEY || ''
   }
 };
 
@@ -66,5 +74,11 @@ export function assertWordpressConfigured() {
   if (missing.length) {
     const envNames = { siteUrl: 'WORDPRESS_SITE_URL', appUser: 'WORDPRESS_APP_USER', appPassword: 'WORDPRESS_APP_PASSWORD' };
     throw new Error(`WordPress is not configured. Missing: ${missing.map(k => envNames[k]).join(', ')}. Add these to content_studio/.env (see .env.example).`);
+  }
+}
+
+export function assertImagePipelineConfigured() {
+  if (!config.imagePipeline.apiKey) {
+    throw new Error('IMAGE_PIPELINE_API_KEY is not set. Add it to content_studio/.env (see .env.example) — must match image_pipeline/.env\'s PIPELINE_API_KEY.');
   }
 }

@@ -16,6 +16,15 @@ dist-ssr
 .env
 server/data
 
+# image_pipeline (Python service)
+image_pipeline/.env
+image_pipeline/venv
+image_pipeline/.venv
+image_pipeline/__pycache__
+image_pipeline/**/__pycache__
+image_pipeline/media
+*.pyc
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

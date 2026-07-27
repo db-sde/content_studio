@@ -1,0 +1,8 @@
+# Only Redis — Postgres is the existing shared Neon database (see DATABASE_URL in .env), not a
+# second instance. For local dev without Docker, `redis-server` from Homebrew works identically;
+# this file exists for CI/deployment parity.
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"

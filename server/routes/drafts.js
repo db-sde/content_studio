@@ -11,6 +11,7 @@ import { canEditFieldServer } from '../utils/serverPermissions.js';
 import { validateFactsOnly, validateState, transformToACF } from '../../src/config/schemas.js';
 import { createNotification } from '../repositories/notificationsRepo.js';
 import { publishDraftToWordPress } from '../integrations/wordpressClient.js';
+import { generateImages, getGenerationStatus, getImageHistory, regenerateImage, patchPrompt, deleteImage } from '../integrations/imagePipelineClient.js';
 import { upsertDirectoryEntry } from '../repositories/directoryRepo.js';
 
 export const draftsRouter = Router();
@@ -405,4 +406,60 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
 
   const updated = await setWordpressPublishInfo(draft.id, { postId: wordpressPostId, url: link });
   res.json({ draft: updated });
+}));
+
+// --- Image pipeline (image_pipeline/, a separate Python service — see
+// server/integrations/imagePipelineClient.js) ------------------------------------------------
+// Admin-only, same boundary as publish-to-wordpress: generating marketing images is a
+// production step for an already-approved page, not something Interns/Seniors trigger mid-review.
+// Every route below is a thin pass-through — the pipeline service owns all real logic; Node's
+// only job is attaching the shared-secret key server-side and translating draft.id <-> external_ref.
+function requireAdminForImagePipeline(req) {
+  if (req.currentUser.role !== 'admin') {
+    const err = new Error('Only an admin can manage page images'); err.status = 403; throw err;
+  }
+}
+
+draftsRouter.post('/:id/generate-images', asyncRoute(async (req, res) => {
+  const draft = await loadDraftOr404(req.params.id);
+  requireAdminForImagePipeline(req);
+  if (draft.status !== 'approved') {
+    const err = new Error('Only an approved draft can have images generated'); err.status = 409; throw err;
+  }
+
+  const pageJson = transformToACF(draft.form_data, draft.page_type);
+  const result = await generateImages({ pageJson, pageType: draft.page_type, externalRef: draft.id });
+  res.status(202).json(result);
+}));
+
+draftsRouter.get('/:id/generation-status', asyncRoute(async (req, res) => {
+  await loadDraftOr404(req.params.id);
+  requireAdminForImagePipeline(req);
+  res.json(await getGenerationStatus(req.params.id));
+}));
+
+draftsRouter.get('/:id/image-history', asyncRoute(async (req, res) => {
+  await loadDraftOr404(req.params.id);
+  requireAdminForImagePipeline(req);
+  res.json(await getImageHistory(req.params.id));
+}));
+
+draftsRouter.post('/:id/regenerate-image', asyncRoute(async (req, res) => {
+  await loadDraftOr404(req.params.id);
+  requireAdminForImagePipeline(req);
+  const { imageId, promptOverride } = req.body;
+  res.json(await regenerateImage({ imageId, promptOverride, createdBy: req.currentUser.name }));
+}));
+
+draftsRouter.patch('/:id/prompt', asyncRoute(async (req, res) => {
+  await loadDraftOr404(req.params.id);
+  requireAdminForImagePipeline(req);
+  const { imageId, structuredPrompt } = req.body;
+  res.json(await patchPrompt({ imageId, structuredPrompt }));
+}));
+
+draftsRouter.delete('/:id/image/:imageId', asyncRoute(async (req, res) => {
+  await loadDraftOr404(req.params.id);
+  requireAdminForImagePipeline(req);
+  res.json(await deleteImage(req.params.imageId));
 }));
