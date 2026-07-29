@@ -9,6 +9,7 @@ import { draftsRouter } from './routes/drafts.js';
 import { notificationsRouter } from './routes/notifications.js';
 import { costsRouter } from './routes/costs.js';
 import { directoryRouter } from './routes/directory.js';
+import { imagePipelineRouter } from './routes/imagePipeline.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireAuth } from './middleware/auth.js';
 import { config } from './config.js';
@@ -42,6 +43,7 @@ export function createApp() {
   app.use('/api/notifications', requireAuth, notificationsRouter);
   app.use('/api/costs', requireAuth, costsRouter);
   app.use('/api/directory', requireAuth, directoryRouter);
+  app.use('/api/image-pipeline', requireAuth, imagePipelineRouter);
 
   app.use(errorHandler);
 

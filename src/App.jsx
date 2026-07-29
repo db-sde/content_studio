@@ -21,6 +21,8 @@ import {
 import { AiFieldToolbar } from './components/AiFieldToolbar';
 import { InvitePanel } from './components/InvitePanel';
 import { NotificationsPanel } from './components/NotificationsPanel';
+import { ImageGenerationPanel } from './components/ImageGenerationPanel';
+import { JsonImageGeneratorPanel } from './components/JsonImageGeneratorPanel';
 import { StyleReviewPanel } from './screens/StyleReviewPanel';
 import { ActivityPanel } from './screens/ActivityPanel';
 import { syncFieldRecord, getPricingEstimate, getGlobalCostSummary } from './services/aiClient';
@@ -39,7 +41,7 @@ import {
   ArrowLeft, Save, Download, Eye, Copy, Trash2,
   History, Sparkles, CheckCircle, AlertCircle, X, ChevronRight,
   Check, CornerDownRight, ClipboardPaste, GraduationCap, BookOpen, Award, Pencil, Bell,
-  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen
+  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images
 } from 'lucide-react';
 import './App.css';
 
@@ -229,6 +231,8 @@ function ContentStudioApp() {
   const [showStyleReview, setShowStyleReview] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
+  const [showJsonImageGenerator, setShowJsonImageGenerator] = useState(false);
+  const [showDraftImageGenerator, setShowDraftImageGenerator] = useState(false);
   // Home is now two tabs instead of one cluttered scroll: 'create' (hero + templates) and
   // 'drafts' (the saved-drafts table, with all its status/priority/live badges) — splitting them
   // is what actually fixes the "too much on one page" complaint, not just re-styling the same pile.
@@ -1375,6 +1379,15 @@ function ContentStudioApp() {
                   Style Review
                 </button>
               )}
+              {(currentUser?.role === 'senior' || currentUser?.role === 'admin') && (
+                <button
+                  type="button"
+                  onClick={() => { setShowJsonImageGenerator(true); setShowUserMenu(false); }}
+                  className="w-full text-left px-3.5 py-2 text-navy hover:bg-off transition-colors"
+                >
+                  Generate Images from JSON
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { setShowActivity(true); setShowUserMenu(false); }}
@@ -1415,6 +1428,14 @@ function ContentStudioApp() {
 
       {showActivity && (
         <ActivityPanel onClose={() => setShowActivity(false)} onOpenDraft={openDraftById} />
+      )}
+
+      {showJsonImageGenerator && (
+        <JsonImageGeneratorPanel onClose={() => setShowJsonImageGenerator(false)} />
+      )}
+
+      {showDraftImageGenerator && activeDraftId && (
+        <ImageGenerationPanel mode="draft" draftId={activeDraftId} onClose={() => setShowDraftImageGenerator(false)} />
       )}
 
       {/* CONFIRM MODAL — in-app replacement for window.confirm(), top-level so it's reachable from
@@ -2029,6 +2050,23 @@ function ContentStudioApp() {
                   >
                     <span className={`w-1.5 h-1.5 rounded-full ${allowInternAiEdit ? 'bg-orange' : 'bg-white/30'}`} />
                     {allowInternAiEdit ? 'Intern AI Edit: On' : 'Intern AI Edit: Off'}
+                  </button>
+                )}
+
+                {/* Marketing images become relevant once Senior has sent the page on to Admin —
+                    not during intern_editing/senior_review, when facts/content can still change
+                    underneath them. Available to both Senior and Admin from that point on
+                    (admin_review through approved), matching this app's existing "Senior and
+                    Admin both always have full access" permission model elsewhere. */}
+                {(currentUser.role === 'senior' || currentUser.role === 'admin') &&
+                  (draftStatus === 'admin_review' || draftStatus === 'approved') && (
+                  <button
+                    type="button"
+                    onClick={() => setShowDraftImageGenerator(true)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 font-bold text-xs rounded transition-all text-white"
+                  >
+                    <Images className="w-3.5 h-3.5" />
+                    Generate Images
                   </button>
                 )}
 

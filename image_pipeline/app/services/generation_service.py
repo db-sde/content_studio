@@ -123,6 +123,24 @@ def patch_prompt(session: Session, image_id: int, structured_prompt: StructuredP
     return {"prompt_id": prompt.id, "structured_prompt": structured_prompt}
 
 
+def get_current_prompt(session: Session, image_id: int) -> dict | None:
+    """Backs the frontend's "Edit Prompt" flow - the structured prompt actually used for this
+    image's current version, so the edit form starts from something real instead of blank."""
+    image = images_repo.get(session, image_id)
+    if image is None:
+        return None
+    if image.current_version_id is None:
+        return {"image_id": image_id, "prompt_id": None, "structured_prompt": None}
+    version = versions_repo.get(session, image.current_version_id)
+    if version is None or version.prompt_id is None:
+        return {"image_id": image_id, "prompt_id": None, "structured_prompt": None}
+    prompt_row = prompts_repo.get(session, version.prompt_id)
+    if prompt_row is None:
+        return {"image_id": image_id, "prompt_id": None, "structured_prompt": None}
+    structured_prompt = StructuredPrompt.model_validate_json(prompt_row.structured_prompt_json)
+    return {"image_id": image_id, "prompt_id": prompt_row.id, "structured_prompt": structured_prompt}
+
+
 def delete_image_version(session: Session, image_id: int) -> bool:
     """Soft delete only: clears which version is 'current' for this image slot. No version row
     that ever succeeded is ever hard-deleted - full history stays queryable via image-history."""

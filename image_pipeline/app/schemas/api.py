@@ -95,3 +95,11 @@ class PatchPromptResponse(BaseModel):
 class DeleteImageResponse(BaseModel):
     ok: bool
     image_id: int
+
+
+class CurrentPromptResponse(BaseModel):
+    """Backs the frontend's "Edit Prompt" flow - lets it prefill the form with what was actually
+    used for the image's current version, rather than starting from a blank prompt."""
+    image_id: int
+    prompt_id: int | None
+    structured_prompt: StructuredPrompt | None

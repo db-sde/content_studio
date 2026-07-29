@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.security import require_pipeline_key
 from app.db.session import get_db
 from app.schemas.api import (
+    CurrentPromptResponse,
     DeleteImageResponse,
     GenerateImagesRequest,
     GenerateImagesResponse,
@@ -59,6 +60,14 @@ def image_history(external_ref: str, session: Session = Depends(get_db)):
     if history is None:
         raise HTTPException(404, f"No generation job found for external_ref={external_ref!r}")
     return history
+
+
+@router.get("/image-prompt/{image_id}", response_model=CurrentPromptResponse)
+def current_prompt(image_id: int, session: Session = Depends(get_db)):
+    result = generation_service.get_current_prompt(session, image_id)
+    if result is None:
+        raise HTTPException(404, f"No image found with id={image_id}")
+    return CurrentPromptResponse(**result)
 
 
 @router.patch("/prompt", response_model=PatchPromptResponse)

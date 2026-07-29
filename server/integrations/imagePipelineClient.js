@@ -45,6 +45,10 @@ export function regenerateImage({ imageId, promptOverride, createdBy }) {
   });
 }
 
+export function getCurrentPrompt(imageId) {
+  return pipelineRequest(`/image-prompt/${imageId}`);
+}
+
 export function patchPrompt({ imageId, structuredPrompt }) {
   return pipelineRequest('/prompt', {
     method: 'PATCH',
