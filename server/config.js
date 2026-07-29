@@ -79,6 +79,6 @@ export function assertWordpressConfigured() {
 
 export function assertImagePipelineConfigured() {
   if (!config.imagePipeline.apiKey) {
-    throw new Error('IMAGE_PIPELINE_API_KEY is not set. Add it to content_studio/.env (see .env.example) — must match image_pipeline/.env\'s PIPELINE_API_KEY.');
+    throw new Error('IMAGE_PIPELINE_API_KEY is not set. Add it to content_studio/.env (see .env.example) — image_pipeline/ reads this same file.');
   }
 }

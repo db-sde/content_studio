@@ -16,8 +16,7 @@ dist-ssr
 .env
 server/data
 
-# image_pipeline (Python service)
-image_pipeline/.env
+# image_pipeline (Python service) — shares the root .env above, has no .env of its own
 image_pipeline/venv
 image_pipeline/.venv
 image_pipeline/__pycache__
