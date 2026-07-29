@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.security import require_pipeline_key
 from app.db.session import get_db
+from app.planner.image_planner import DOCX_DRIVEN_PAGE_TYPES
 from app.schemas.api import (
     CurrentPromptResponse,
     DeleteImageResponse,
@@ -16,6 +17,7 @@ from app.schemas.api import (
     RegenerateImageResponse,
 )
 from app.services import generation_service
+from app.services.docx_extraction import DocxExtractionError, extract_text_from_docx
 
 router = APIRouter(dependencies=[Depends(require_pipeline_key)])
 
@@ -24,6 +26,27 @@ router = APIRouter(dependencies=[Depends(require_pipeline_key)])
 def generate_images(req: GenerateImagesRequest, session: Session = Depends(get_db)):
     result = generation_service.start_generation_job(
         session, page_json=req.page_json, page_type=req.page_type, external_ref=req.external_ref,
+    )
+    return GenerateImagesResponse(**result)
+
+
+@router.post("/generate-images-from-docx", response_model=GenerateImagesResponse, status_code=202)
+def generate_images_from_docx(
+    file: UploadFile = File(...),
+    page_type: str = Form(...),
+    external_ref: str = Form(...),
+    session: Session = Depends(get_db),
+):
+    if page_type not in DOCX_DRIVEN_PAGE_TYPES:
+        raise HTTPException(400, f"page_type must be one of: {sorted(DOCX_DRIVEN_PAGE_TYPES)}")
+
+    try:
+        text = extract_text_from_docx(file.file.read())
+    except DocxExtractionError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    result = generation_service.start_generation_job(
+        session, page_json={"docx_text": text}, page_type=page_type, external_ref=external_ref,
     )
     return GenerateImagesResponse(**result)
 

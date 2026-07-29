@@ -3,21 +3,25 @@ import { Sparkles, RotateCw, Pencil, History as HistoryIcon, X, Loader2, AlertTr
 import {
   generateImagesForDraft, getGenerationStatusForDraft, getImageHistoryForDraft,
   regenerateImageForDraft, getCurrentPromptForDraft, patchPromptForDraft,
-  generateImagesFromJson, getGenerationStatusByRef, getImageHistoryByRef,
+  generateImagesFromJson, generateImagesFromDocx, getGenerationStatusByRef, getImageHistoryByRef,
   regenerateImageStandalone, getCurrentPromptStandalone, patchPromptStandalone
 } from '../services/imagePipelineClient.js';
 
 const ROLE_LABELS = { hero: 'Hero Banner', body1: 'Supporting Image 1', body2: 'Supporting Image 2', body3: 'Supporting Image 3' };
-const ROLES = ['hero', 'body1', 'body2', 'body3'];
+// Canonical order only — how many of these actually apply depends on page type (1 for
+// university/course/specialization/category, all 4 for blog). Never assume a fixed count; the
+// roles actually rendered are whatever the backend's status response comes back with.
+const ALL_ROLES = ['hero', 'body1', 'body2', 'body3'];
 const POLL_MS = 2500;
 
 const emptyPrompt = () => ({ subject: '', background: '', composition: '', lighting: '', style: '', negative_prompt: [] });
 
-// Renders identically for both entry points — a draft that's reached Admin review, or a raw
-// pasted JSON blob with no draft behind it at all — the only difference is which API surface
-// each action hits underneath (drafts.js's draft-scoped routes vs. the standalone
-// /api/image-pipeline ones), selected once here via `mode` rather than forking the whole panel.
-export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClose }) => {
+// Renders identically for all 3 entry points — a draft that's reached Admin review, a raw pasted
+// JSON blob, or an uploaded .docx, none of which have a draft behind them — the only difference
+// is which API surface each action hits underneath (drafts.js's draft-scoped routes vs. the
+// standalone /api/image-pipeline ones), selected once here via `mode` rather than forking the
+// whole panel. mode: 'draft' | 'standalone-json' | 'standalone-docx'.
+export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, file, onClose }) => {
   const [externalRef, setExternalRef] = useState(mode === 'draft' ? draftId : null);
   const [status, setStatus] = useState(null);
   const [generating, setGenerating] = useState(false);
@@ -31,6 +35,14 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClos
   const [historyLoading, setHistoryLoading] = useState(false);
   const pollRef = useRef(null);
 
+  const standaloneApi = {
+    status: (ref) => getGenerationStatusByRef(ref),
+    history: (ref) => getImageHistoryByRef(ref),
+    regenerate: (imageId, promptOverride) => regenerateImageStandalone({ imageId, promptOverride }),
+    currentPrompt: (imageId) => getCurrentPromptStandalone(imageId),
+    patchPrompt: (imageId, structuredPrompt) => patchPromptStandalone({ imageId, structuredPrompt })
+  };
+
   const api = mode === 'draft'
     ? {
       generate: () => generateImagesForDraft(draftId),
@@ -40,14 +52,9 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClos
       currentPrompt: (imageId) => getCurrentPromptForDraft(draftId, imageId),
       patchPrompt: (imageId, structuredPrompt) => patchPromptForDraft(draftId, { imageId, structuredPrompt })
     }
-    : {
-      generate: () => generateImagesFromJson({ pageJson, pageType }),
-      status: (ref) => getGenerationStatusByRef(ref),
-      history: (ref) => getImageHistoryByRef(ref),
-      regenerate: (imageId, promptOverride) => regenerateImageStandalone({ imageId, promptOverride }),
-      currentPrompt: (imageId) => getCurrentPromptStandalone(imageId),
-      patchPrompt: (imageId, structuredPrompt) => patchPromptStandalone({ imageId, structuredPrompt })
-    };
+    : mode === 'standalone-docx'
+      ? { generate: () => generateImagesFromDocx({ file, pageType }), ...standaloneApi }
+      : { generate: () => generateImagesFromJson({ pageJson, pageType }), ...standaloneApi };
 
   const refreshStatus = useCallback(async (ref) => {
     try {
@@ -160,7 +167,14 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClos
     }
   };
 
-  const anyGenerated = status && ROLES.some(r => status.images?.[r]);
+  const activeRoles = status ? ALL_ROLES.filter(r => r in (status.images || {})) : [];
+  const anyGenerated = activeRoles.some(r => status.images?.[r]);
+
+  const headerLabel = mode === 'draft'
+    ? 'Generate Page Images'
+    : mode === 'standalone-docx'
+      ? 'Generate Images from Document'
+      : 'Generate Images from JSON';
 
   return (
     <>
@@ -169,7 +183,7 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClos
         <div className="p-4 bg-black/20 border-b border-white/10 flex justify-between items-center shrink-0">
           <span className="text-xs font-bold uppercase tracking-wider text-gray-300 flex items-center gap-1.5">
             <span className="w-2 h-2 rounded-full bg-orange"></span>
-            {mode === 'draft' ? 'Generate Page Images' : 'Generate Images from JSON'}
+            {headerLabel}
           </span>
           <button onClick={onClose} className="p-1.5 hover:bg-white/10 rounded text-gray-300 transition-colors" title="Close">
             <X className="w-4 h-4" />
@@ -177,9 +191,14 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClos
         </div>
 
         <div className="flex-1 overflow-y-auto styled-scrollbar p-4 space-y-4">
-          {mode === 'standalone' && (
+          {mode === 'standalone-json' && (
             <p className="text-xs text-gray-400">
               Generating directly from pasted JSON — {externalRef ? `tracked as ${externalRef}` : 'no linked draft, nothing is saved to a draft record'}.
+            </p>
+          )}
+          {mode === 'standalone-docx' && (
+            <p className="text-xs text-gray-400">
+              Generating from the uploaded document — {externalRef ? `tracked as ${externalRef}` : 'no linked draft, nothing is saved to a draft record'}.
             </p>
           )}
 
@@ -198,13 +217,13 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, onClos
           >
             <Sparkles className="w-3.5 h-3.5" />
             {generating || status?.status === 'processing'
-              ? 'Generating all 4 images…'
-              : anyGenerated ? 'Generate Again (new set of 4)' : 'Generate All 4 Images'}
+              ? 'Generating…'
+              : anyGenerated ? 'Generate Again (new set)' : 'Generate Images'}
           </button>
 
           {status && (
             <div className="grid grid-cols-1 gap-3">
-              {ROLES.map(role => (
+              {activeRoles.map(role => (
                 <ImageSlot
                   key={role}
                   role={role}

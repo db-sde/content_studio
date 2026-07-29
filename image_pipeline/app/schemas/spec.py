@@ -20,10 +20,9 @@ class ImageSpec(BaseModel):
 
 
 class ImageSpecSet(BaseModel):
-    hero: ImageSpec
-    body1: ImageSpec
-    body2: ImageSpec
-    body3: ImageSpec
+    """Holds however many roles a given page type actually needs - 1 for a single-image page
+    (university/course/specialization/category), 4 for a multi-image one (blog)."""
+    specs: dict[ImageRole, ImageSpec]
 
     def all(self) -> list[ImageSpec]:
-        return [self.hero, self.body1, self.body2, self.body3]
+        return list(self.specs.values())

@@ -30,6 +30,32 @@ export function generateImages({ pageJson, pageType, externalRef }) {
   });
 }
 
+// Multipart, not JSON — category/blog pages have no facts JSON at all, only a dropped .docx.
+// Separate from pipelineRequest() since that helper always sends application/json; a FormData
+// body needs its own Content-Type (with the multipart boundary) that fetch sets automatically
+// when no Content-Type header is given.
+export async function generateImagesFromDocx({ fileBuffer, fileName, pageType, externalRef }) {
+  assertImagePipelineConfigured();
+
+  const form = new FormData();
+  form.append('file', new Blob([fileBuffer]), fileName || 'document.docx');
+  form.append('page_type', pageType);
+  form.append('external_ref', externalRef);
+
+  const res = await fetch(`${config.imagePipeline.baseUrl}/generate-images-from-docx`, {
+    method: 'POST',
+    headers: { 'X-Pipeline-Key': config.imagePipeline.apiKey },
+    body: form
+  });
+
+  const payload = await res.json().catch(() => null);
+  if (!res.ok) {
+    const message = payload?.detail || `image_pipeline request to /generate-images-from-docx failed (${res.status})`;
+    throw new Error(typeof message === 'string' ? message : JSON.stringify(message));
+  }
+  return payload;
+}
+
 export function getGenerationStatus(externalRef) {
   return pipelineRequest(`/generation-status?external_ref=${encodeURIComponent(externalRef)}`);
 }

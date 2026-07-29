@@ -61,6 +61,27 @@ export function generateImagesFromJson({ pageJson, pageType, label }) {
   return postJSON('/api/image-pipeline/generate-images', { pageJson, pageType, label: label ?? null });
 }
 
+// Category/blog pages have no facts JSON at all — just a dropped .docx — so this posts
+// multipart form data instead of JSON. No Content-Type header: the browser sets it (with the
+// multipart boundary) automatically when the body is a FormData instance.
+export async function generateImagesFromDocx({ file, pageType, label }) {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('pageType', pageType);
+  if (label) form.append('label', label);
+
+  const res = await fetch('/api/image-pipeline/generate-images-from-docx', {
+    method: 'POST',
+    credentials: 'include',
+    body: form
+  });
+  if (!res.ok) {
+    const payload = await res.json().catch(() => ({}));
+    throw new Error(payload.error || `Request to /api/image-pipeline/generate-images-from-docx failed (${res.status})`);
+  }
+  return res.json();
+}
+
 export function getGenerationStatusByRef(ref) {
   return getJSON(`/api/image-pipeline/generation-status/${encodeURIComponent(ref)}`);
 }

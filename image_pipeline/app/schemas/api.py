@@ -7,11 +7,15 @@ from app.schemas.spec import ImageRole, ImageSpec
 
 JobStatus = Literal["queued", "processing", "partial", "completed", "failed"]
 VersionStatus = Literal["pending", "succeeded", "failed"]
+# university/course/specialization are JSON-driven (from a Content Studio draft); category/blog
+# are docx-driven (see app.planner.image_planner.DOCX_DRIVEN_PAGE_TYPES) - both go through the
+# same page_type field, the planner just branches on which kind it is.
+PageType = Literal["university", "course", "specialization", "category", "blog"]
 
 
 class GenerateImagesRequest(BaseModel):
     page_json: dict[str, Any]
-    page_type: Literal["university", "course", "specialization"]
+    page_type: PageType
     external_ref: str  # Content Studio's draft.id, e.g. "draft_1784708859674"
 
 
@@ -22,7 +26,7 @@ class GenerateImagesResponse(BaseModel):
 
 class GeneratePromptRequest(BaseModel):
     page_json: dict[str, Any]
-    page_type: Literal["university", "course", "specialization"]
+    page_type: PageType
     role: ImageRole
 
 

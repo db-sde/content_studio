@@ -6,7 +6,7 @@ import json
 from celery import chord, group
 from sqlalchemy.orm import Session
 
-from app.planner.image_planner import plan_images
+from app.planner.image_planner import ROLES_BY_PAGE_TYPE, plan_images
 from app.prompts.prompt_generator import generate_prompt
 from app.repositories import images_repo, jobs_repo, prompts_repo, providers_repo, versions_repo
 from app.schemas.api import (
@@ -19,18 +19,18 @@ from app.schemas.prompt import StructuredPrompt
 from app.schemas.spec import ImageRole, ImageSpec
 from app.tasks.generation_tasks import generate_single_image_task, finalize_job_task, regenerate_single_image_task
 
-_ROLES: list[ImageRole] = ["hero", "body1", "body2", "body3"]
-
 
 def start_generation_job(session: Session, *, page_json: dict, page_type: str, external_ref: str) -> dict:
+    roles = ROLES_BY_PAGE_TYPE[page_type]
     job = jobs_repo.create_job(session, external_ref=external_ref, page_type=page_type, page_json=page_json)
-    for role in _ROLES:
+    for role in roles:
         images_repo.get_or_create(session, job_id=job.id, image_role=role)
     jobs_repo.set_status(session, job, "processing")
 
-    # A chord: 4 generation tasks run in parallel, finalize_job_task fires once all 4 finish
-    # (regardless of individual success/failure - see generation_tasks.py's per-image try/except).
-    chord(group(generate_single_image_task.s(job.id, role) for role in _ROLES))(finalize_job_task.s(job.id))
+    # A chord: all of this page type's images run in parallel, finalize_job_task fires once they
+    # all finish (regardless of individual success/failure - see generation_tasks.py's per-image
+    # try/except). 1 image for most page types, 4 (hero + 3 supporting) for blog.
+    chord(group(generate_single_image_task.s(job.id, role) for role in roles))(finalize_job_task.s(job.id))
 
     return {"job_id": job.id, "status": job.status}
 
@@ -39,7 +39,7 @@ def preview_prompt(page_json: dict, page_type: str, role: ImageRole) -> tuple[Im
     """No DB writes - just runs the planner + prompt generator for /generate-prompt, so a
     caller can inspect what would be sent before actually generating an image."""
     spec = next(s for s in plan_images(page_json, page_type).all() if s.role == role)
-    structured_prompt = generate_prompt(page_json, spec)
+    structured_prompt = generate_prompt(page_json, spec, page_type=page_type)
     return spec, structured_prompt
 
 
@@ -50,7 +50,7 @@ def get_generation_status(session: Session, external_ref: str) -> GenerationStat
 
     images_by_role = {img.image_role: img for img in images_repo.get_for_job(session, job.id)}
     results: dict[str, ImageResult | None] = {}
-    for role in _ROLES:
+    for role in ROLES_BY_PAGE_TYPE[job.page_type]:
         image = images_by_role.get(role)
         if image is None or image.current_version_id is None:
             results[role] = None
@@ -84,7 +84,7 @@ def get_all_image_history(session: Session, external_ref: str) -> dict[str, Imag
         return None
     images_by_role = {img.image_role: img for img in images_repo.get_for_job(session, job.id)}
     result: dict[str, ImageHistoryResponse] = {}
-    for role in _ROLES:
+    for role in ROLES_BY_PAGE_TYPE[job.page_type]:
         image = images_by_role.get(role)
         result[role] = get_image_history(session, image.id) if image else ImageHistoryResponse(job_id=job.id, role=role, versions=[])
     return result

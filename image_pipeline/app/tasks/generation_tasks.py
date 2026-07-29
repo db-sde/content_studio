@@ -39,7 +39,7 @@ def generate_single_image_task(self, job_id: int, role: str) -> dict:
         image = images_repo.get_or_create(session, job_id=job_id, image_role=role)
 
         try:
-            structured_prompt = generate_prompt(page_json, spec)
+            structured_prompt = generate_prompt(page_json, spec, page_type=job.page_type)
         except Exception as exc:  # noqa: BLE001 - recorded, not re-raised; see module docstring
             _record_failure(session, image_id=image.id, spec=spec, error=str(exc))
             return {"role": role, "status": "failed", "error": str(exc)}
@@ -70,7 +70,7 @@ def regenerate_single_image_task(self, image_id: int, prompt_override: dict | No
             job = jobs_repo.get_job(session, image.job_id)
             page_json = json.loads(job.source_json) if job else {}
             try:
-                structured_prompt = generate_prompt(page_json, spec)
+                structured_prompt = generate_prompt(page_json, spec, page_type=job.page_type if job else "")
             except Exception as exc:  # noqa: BLE001
                 return {"status": "failed", "error": str(exc)}
 

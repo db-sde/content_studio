@@ -22,7 +22,7 @@ import { AiFieldToolbar } from './components/AiFieldToolbar';
 import { InvitePanel } from './components/InvitePanel';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import { ImageGenerationPanel } from './components/ImageGenerationPanel';
-import { JsonImageGeneratorPanel } from './components/JsonImageGeneratorPanel';
+import { StandaloneImageGeneratorPanel } from './components/StandaloneImageGeneratorPanel';
 import { StyleReviewPanel } from './screens/StyleReviewPanel';
 import { ActivityPanel } from './screens/ActivityPanel';
 import { syncFieldRecord, getPricingEstimate, getGlobalCostSummary } from './services/aiClient';
@@ -1385,7 +1385,7 @@ function ContentStudioApp() {
                   onClick={() => { setShowJsonImageGenerator(true); setShowUserMenu(false); }}
                   className="w-full text-left px-3.5 py-2 text-navy hover:bg-off transition-colors"
                 >
-                  Generate Images from JSON
+                  Generate Images
                 </button>
               )}
               <button
@@ -1431,7 +1431,7 @@ function ContentStudioApp() {
       )}
 
       {showJsonImageGenerator && (
-        <JsonImageGeneratorPanel onClose={() => setShowJsonImageGenerator(false)} />
+        <StandaloneImageGeneratorPanel onClose={() => setShowJsonImageGenerator(false)} />
       )}
 
       {showDraftImageGenerator && activeDraftId && (
