@@ -20,11 +20,16 @@ visual cues); blog gets a broader editorial brief plus a per-role addendum (hero
 
 The model also returns headline/subheading/chips text (see StructuredPrompt.overlay) - this is
 composited onto the image afterward with a real font (app.processing.text_overlay), never baked
-in by the image model itself, since diffusion models reliably garble rendered text. For
-course/specialization the LLM's headline/chips are discarded and replaced with values computed
-directly from the exact JSON facts (_deterministic_overlay) - those are real names/numbers already
-known exactly, so there's no reason to let the LLM re-guess them. Category/blog have no such
-structured source of truth, so the LLM's own grounded text is used as-is there.
+in by the image model itself, since diffusion models reliably garble rendered text. Chips are
+always computed directly from the exact JSON facts for course/specialization (_deterministic_chips)
+since they're just exact values with no wording judgement involved. The headline is different: raw
+university_name/course-name fields often overlap (e.g. one already ends in "Online"), and merging
+that into one clean, non-duplicated phrase is a language task Claude is reliable at - unlike a
+diffusion model rendering pixels, this carries no spelling-garbling risk, so the LLM's own merged
+headline is trusted as long as it's still verifiably grounded in the real name
+(_is_grounded_headline); otherwise a safe fallback concatenation is used instead
+(_fallback_headline). Category/blog have no structured facts to fall back to at all, so the LLM's
+own grounded text is used as-is there.
 """
 
 import json
@@ -89,17 +94,14 @@ def _facts_for_spec(page_json: dict, spec: ImageSpec) -> dict:
     return {key: page_json.get(key) for key in spec.source_fields if page_json.get(key)}
 
 
-def _build_headline(university: str, name: str) -> str:
-    """"[University Name] [Program/Specialization Name]" - except real-world data entry isn't
-    always clean (e.g. a university_name field of "Sharda University Online" plus a program_name
-    of "Sharda Online MBA" naively concatenates into "Sharda University Online Sharda Online
-    MBA"). If most of university's words already appear somewhere in name, trust that name is
-    already self-contained and skip prepending it again, rather than duplicate words."""
+def _fallback_headline(university: str, name: str) -> str:
+    """Dumb-but-safe concatenation, used only when the LLM's own headline doesn't look grounded
+    in the real facts (see _is_grounded_headline) - naive word-overlap collapsing can still
+    produce an awkward phrase in edge cases, but it's a last resort, not the primary path."""
     if not university:
         return name or "Online Program"
     if not name:
         return university
-
     uni_words = [w.lower() for w in university.split()]
     name_lower = name.lower()
     overlap = sum(1 for w in uni_words if w in name_lower) / len(uni_words)
@@ -108,19 +110,30 @@ def _build_headline(university: str, name: str) -> str:
     return f"{university} {name}"
 
 
-def _deterministic_overlay(page_json: dict, *, page_type: str) -> OverlayText:
-    """Course/specialization headlines are just "[University Name] [Program/Specialization
-    Name]" and chips are just whichever short facts (mode/duration/accreditation) are present -
-    all values already known exactly from page_json, so compute them directly rather than trust
-    an LLM to copy them correctly."""
-    university = (page_json.get("university_name") or "").strip()
-    name = (page_json.get(_NAME_FIELD_BY_JSON_PAGE_TYPE[page_type]) or "").strip()
-    headline = _build_headline(university, name)
+def _is_grounded_headline(headline: str, name: str) -> bool:
+    """Real-world university_name/program_name text isn't always clean (e.g. a university_name
+    field of "Sharda University Online" plus a program_name of "Sharda Online MBA" naively
+    concatenates into a duplicated "Sharda University Online Sharda Online MBA"). Merging that
+    kind of overlap into one natural phrase is a language task Claude is reliable at (unlike a
+    diffusion model rendering pixels) - so the LLM's own merged headline (see
+    _OVERLAY_OUTPUT_RULE) is trusted as long as it's still clearly grounded in the real course/
+    specialization name, rather than re-derived with a brittle Python heuristic every time."""
+    if not headline:
+        return False
+    headline_lower = headline.lower()
+    significant = [w for w in name.split() if len(w) > 2]
+    if not significant:
+        return True
+    matched = sum(1 for w in significant if w.lower() in headline_lower)
+    return matched / len(significant) >= 0.6
 
+
+def _deterministic_chips(page_json: dict) -> list[str]:
+    """Chips are just whichever short facts (mode/duration/accreditation) are present - always
+    computed directly from page_json since these are exact values with no merging/wording
+    judgement involved."""
     chip_candidates = [page_json.get("mode"), page_json.get("duration"), page_json.get("naac_grade") or page_json.get("ugc_status")]
-    chips = [c.strip() for c in chip_candidates if c and c.strip()][:3]
-
-    return OverlayText(headline=headline or "Online Program", chips=chips)
+    return [c.strip() for c in chip_candidates if c and c.strip()][:3]
 
 
 def _call_model(system_prompt: str, user_content: str) -> StructuredPrompt:
@@ -162,9 +175,17 @@ def _generate_from_facts(page_json: dict, spec: ImageSpec, *, page_type: str) ->
         f"present here: {json.dumps(facts, ensure_ascii=False)}"
     )
     structured_prompt = _call_model(system_prompt, user_content)
-    # Replace whatever the LLM guessed for headline/chips with the exact real values - see
-    # _deterministic_overlay's docstring for why.
-    structured_prompt.overlay = _deterministic_overlay(page_json, page_type=page_type)
+
+    # Chips are always computed directly (exact facts, no wording judgement needed). The
+    # headline is trusted from the LLM (it naturally merges overlapping university/course-name
+    # text - see _OVERLAY_OUTPUT_RULE) as long as it's still clearly grounded in the real name;
+    # otherwise fall back to a safe concatenation rather than risk an invented headline.
+    university = (page_json.get("university_name") or "").strip()
+    name = (page_json.get(_NAME_FIELD_BY_JSON_PAGE_TYPE[page_type]) or "").strip()
+    llm_headline = (structured_prompt.overlay.headline if structured_prompt.overlay else "").strip()
+    headline = llm_headline if _is_grounded_headline(llm_headline, name) else _fallback_headline(university, name)
+
+    structured_prompt.overlay = OverlayText(headline=headline or "Online Program", chips=_deterministic_chips(page_json))
     return structured_prompt
 
 

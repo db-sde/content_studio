@@ -32,10 +32,17 @@ _NO_TEXT_RULE = """Do not render any text, words, letters, numbers, or typograph
 image itself - no headline, no labels, no logos with lettering. Produce a clean photographic \
 composition only; a separate process draws the real headline/labels on top afterward."""
 
-_OVERLAY_OUTPUT_RULE = """In addition to the visual fields, also output: headline (the exact \
-on-page headline text, using only real names/values actually given - never invent one), \
+_OVERLAY_OUTPUT_RULE = """In addition to the visual fields, also output: headline (the on-page \
+headline text, built ONLY from the real names/values actually given - never invent a new one), \
 subheading (one short supporting line, or omit if none fits naturally), and chips (up to 3 short \
-highlight labels, 1-4 words each, chosen only from facts actually given)."""
+highlight labels, 1-4 words each, chosen only from facts actually given).
+
+Real-world names are often untidy - a university_name field might already end in "Online", or a \
+course/specialization name might repeat the institution's own abbreviation. When combining two \
+given fields into one headline, merge them into a single clean, natural phrase and never repeat \
+the same word or concept twice (e.g. university_name "Sharda University Online" + course name \
+"Sharda Online MBA" should become "Sharda University Online MBA", not "Sharda University Online \
+Sharda Online MBA"). Every word in the headline must still trace back to something actually given."""
 
 COURSE_SYSTEM_PROMPT = f"""You are an expert educational brand designer producing a structured \
 visual brief (subject/background/composition/lighting/style fields) for a course page hero \

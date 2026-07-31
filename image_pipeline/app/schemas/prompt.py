@@ -28,6 +28,17 @@ DEFAULT_NEGATIVE_PROMPT = [
     "apply now button",
     "exact fee amount",
     "ranking badge",
+    # Diffusion models also frequently mangle human anatomy in busy/occluded poses (a third
+    # hand, fused/extra fingers) - reduces but does not eliminate this, since it's a probabilistic
+    # generation artifact rather than something a prompt can fully rule out.
+    "extra limbs",
+    "extra hands",
+    "extra fingers",
+    "malformed hands",
+    "fused fingers",
+    "deformed anatomy",
+    "distorted body",
+    "mutated hands",
 ]
 
 
