@@ -17,7 +17,6 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=str(_REPO_ROOT / ".env"), extra="ignore")
 
     database_url: str
-    redis_url: str = "redis://localhost:6379/0"
     # Same shared secret Node's imagePipelineClient.js sends as X-Pipeline-Key - one env var name
     # (IMAGE_PIPELINE_API_KEY) used by both sides now, instead of two different names for the
     # same value.
@@ -35,7 +34,7 @@ class Settings(BaseSettings):
     # Claude models for different jobs, so they can't share one env var name.
     anthropic_model: str = Field(default="claude-opus-5", validation_alias=AliasChoices("IMAGE_PIPELINE_ANTHROPIC_MODEL", "ANTHROPIC_MODEL"))
 
-    storage_backend: str = "local"
+    storage_backend: str = "cloudinary"
     # Anchored to this file's location, not the process cwd - local_disk.py joins keys onto this
     # with plain os.path.join, so a relative default here would land in a different real directory
     # depending on whether the process happens to be launched from image_pipeline/ or the repo
@@ -49,8 +48,16 @@ class Settings(BaseSettings):
     r2_bucket: str = ""
     r2_public_base_url: str = ""
 
-    # Target ceiling for each processed image — see app/processing/image_processor.py.
-    max_image_size_bytes: int = 200 * 1024
+    # Cloudinary - only required when STORAGE_BACKEND=cloudinary. The production choice: publicly
+    # reachable from WordPress (and anywhere else) without a Render persistent disk.
+    cloudinary_cloud_name: str = ""
+    cloudinary_api_key: str = ""
+    cloudinary_api_secret: str = ""
+
+    # Target ceiling for each processed image — see app/processing/image_processor.py. ~100KB
+    # keeps hero/body images fast-loading on the published pages without visible quality loss at
+    # these pixel dimensions.
+    max_image_size_bytes: int = 100 * 1024
 
 
 @lru_cache

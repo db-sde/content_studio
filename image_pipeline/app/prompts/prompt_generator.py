@@ -4,14 +4,19 @@ LLM-assisted, not template-only: the *shape* of a structured prompt is fixed and
 validated by Pydantic, but the creative language (subject/background/composition/
 lighting/style) has to vary per page in a way a static template can't across thousands
 of different pages. `negative_prompt` is deliberately NOT part of what the model
-generates - it's a fixed constraint the backend owns (no on-image text, logos, or
-pricing), so it can never be softened or dropped by the model's own judgement.
+generates - it's a fixed constraint the backend owns, so it can never be softened or
+dropped by the model's own judgement.
 
-Two grounding sources, same output shape: university/course/specialization pages are
-grounded in a subset of Content Studio's structured JSON facts; category/blog pages have
-no JSON at all (they're authored as a dropped .docx) and are grounded in that document's
-raw extracted text instead. Which one applies is decided once, by page_type, via
-DOCX_DRIVEN_PAGE_TYPES - callers never need to branch on this themselves.
+Two grounding sources, same output shape: course/specialization pages are grounded in a
+subset of Content Studio's structured JSON facts; category/blog pages have no JSON at all
+(they're authored as a dropped .docx) and are grounded in that document's raw extracted
+text instead. Which one applies is decided once, by page_type, via DOCX_DRIVEN_PAGE_TYPES -
+callers never need to branch on this themselves.
+
+The actual creative brief per page type - course/specialization/category get very specific,
+brand-defined instructions (exact headline format, chip counts, word limits, discipline-specific
+visual cues); blog gets a broader editorial brief plus a per-role addendum (hero vs. supporting
+1/2/3). See app.prompts.templates for all of these.
 """
 
 import json
@@ -21,12 +26,31 @@ from pydantic import BaseModel
 
 from app.core.config import get_settings
 from app.planner.image_planner import DOCX_DRIVEN_PAGE_TYPES
+from app.prompts.templates import (
+    BLOG_ROLE_ADDENDA,
+    BLOG_SYSTEM_PROMPT,
+    CATEGORY_SYSTEM_PROMPT,
+    COURSE_SYSTEM_PROMPT,
+    SPECIALIZATION_SYSTEM_PROMPT,
+)
 from app.schemas.prompt import DEFAULT_NEGATIVE_PROMPT, StructuredPrompt
 from app.schemas.spec import ImageSpec
 
 # Docx text is capped before being sent to the model - a sane guard against a pathologically
 # huge upload inflating latency/cost, well beyond what any real article/category doc needs.
 _MAX_DOCX_CHARS = 20000
+
+# Course/specialization are the only JSON-driven page types left (university generates no images).
+_JSON_SYSTEM_PROMPTS: dict[str, str] = {
+    "course": COURSE_SYSTEM_PROMPT,
+    "specialization": SPECIALIZATION_SYSTEM_PROMPT,
+}
+
+# Category is docx-driven with a single fixed brief; blog is docx-driven with a shared brief plus
+# a per-role addendum layered on (hero vs. supporting 1/2/3 each have a distinct job).
+_DOCX_SYSTEM_PROMPTS: dict[str, str] = {
+    "category": CATEGORY_SYSTEM_PROMPT,
+}
 
 
 class _LLMPromptFields(BaseModel):
@@ -35,38 +59,6 @@ class _LLMPromptFields(BaseModel):
     composition: str
     lighting: str
     style: str
-
-
-_SYSTEM_PROMPT = """You are a creative director for a premium educational marketing website. \
-Given an image's purpose and the real facts behind it, write a structured visual brief for a \
-professional photorealistic marketing photograph - the kind an agency would commission for a \
-university or degree program, not generic AI-art.
-
-Rules:
-- Ground every detail in the facts provided. Never invent institution names, statistics, or claims.
-- The subject and background must read as premium, modern, and realistic - editorial photography, \
-  not stock-photo cliche or sci-fi/fantasy imagery.
-- Never describe any text, logo, signage, price, or number appearing IN the image itself - all \
-  on-image text/branding is composited separately afterward. Describe only the visual scene.
-- Composition should account for where this image is placed on the page (e.g. leave clear space \
-  for a heading if it's a hero banner)."""
-
-_DOCX_SYSTEM_PROMPT = """You are a creative director for a premium educational marketing website. \
-Given an image's purpose/placement and the full text of the source article/category document it \
-illustrates, write a structured visual brief for a professional photorealistic marketing \
-photograph - the kind an agency would commission, not generic AI-art.
-
-Rules:
-- Ground every detail in the document text provided. Never invent facts, names, or statistics \
-  not present in it.
-- The subject and background must read as premium, modern, and realistic - editorial photography, \
-  not stock-photo cliche or sci-fi/fantasy imagery.
-- Never describe any text, logo, signage, price, or number appearing IN the image itself - all \
-  on-image text/branding is composited separately afterward. Describe only the visual scene.
-- Composition should account for where this image is placed on the page (e.g. leave clear space \
-  for a heading if it's a hero banner).
-- This image is one of several illustrating the same document - make it visually distinct from \
-  an image covering a different part of the same piece."""
 
 
 class PromptGenerationError(RuntimeError):
@@ -105,31 +97,33 @@ def _call_model(system_prompt: str, user_content: str) -> StructuredPrompt:
     )
 
 
-def _generate_from_facts(page_json: dict, spec: ImageSpec) -> StructuredPrompt:
+def _generate_from_facts(page_json: dict, spec: ImageSpec, *, page_type: str) -> StructuredPrompt:
     facts = _facts_for_spec(page_json, spec)
+    system_prompt = _JSON_SYSTEM_PROMPTS[page_type]
     user_content = (
         f"Image role: {spec.role}\n"
-        f"Purpose: {spec.purpose}\n"
         f"Placement: {spec.placement}\n"
-        f"Visual objective: {spec.visual_objective}\n"
-        f"Grounding facts (JSON): {json.dumps(facts, ensure_ascii=False)}"
+        f"Grounding facts (JSON) - use these exact real names/values, never invent ones not "
+        f"present here: {json.dumps(facts, ensure_ascii=False)}"
     )
-    return _call_model(_SYSTEM_PROMPT, user_content)
+    return _call_model(system_prompt, user_content)
 
 
-def _generate_from_docx_text(docx_text: str, spec: ImageSpec) -> StructuredPrompt:
+def _generate_from_docx_text(docx_text: str, spec: ImageSpec, *, page_type: str) -> StructuredPrompt:
     trimmed = (docx_text or "")[:_MAX_DOCX_CHARS]
+    system_prompt = _DOCX_SYSTEM_PROMPTS.get(page_type)
+    if system_prompt is None:
+        # blog: shared brief + a role-specific addendum (hero vs. supporting 1/2/3)
+        system_prompt = BLOG_SYSTEM_PROMPT + "\n\n" + BLOG_ROLE_ADDENDA.get(spec.role, "")
     user_content = (
         f"Image role: {spec.role}\n"
-        f"Purpose: {spec.purpose}\n"
         f"Placement: {spec.placement}\n"
-        f"Visual objective: {spec.visual_objective}\n"
         f"Source document text:\n{trimmed}"
     )
-    return _call_model(_DOCX_SYSTEM_PROMPT, user_content)
+    return _call_model(system_prompt, user_content)
 
 
 def generate_prompt(page_json: dict, spec: ImageSpec, *, page_type: str) -> StructuredPrompt:
     if page_type in DOCX_DRIVEN_PAGE_TYPES:
-        return _generate_from_docx_text(page_json.get("docx_text", ""), spec)
-    return _generate_from_facts(page_json, spec)
+        return _generate_from_docx_text(page_json.get("docx_text", ""), spec, page_type=page_type)
+    return _generate_from_facts(page_json, spec, page_type=page_type)

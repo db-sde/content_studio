@@ -7,10 +7,11 @@ from app.schemas.spec import ImageRole, ImageSpec
 
 JobStatus = Literal["queued", "processing", "partial", "completed", "failed"]
 VersionStatus = Literal["pending", "succeeded", "failed"]
-# university/course/specialization are JSON-driven (from a Content Studio draft); category/blog
-# are docx-driven (see app.planner.image_planner.DOCX_DRIVEN_PAGE_TYPES) - both go through the
-# same page_type field, the planner just branches on which kind it is.
-PageType = Literal["university", "course", "specialization", "category", "blog"]
+# course/specialization are JSON-driven (from a Content Studio draft); category/blog are
+# docx-driven (see app.planner.image_planner.DOCX_DRIVEN_PAGE_TYPES) - both go through the same
+# page_type field, the planner just branches on which kind it is. University is deliberately
+# absent - it does not generate images at all, so this Literal itself rejects any attempt.
+PageType = Literal["course", "specialization", "category", "blog"]
 
 
 class GenerateImagesRequest(BaseModel):

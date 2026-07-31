@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { X, ArrowRight, UploadCloud, FileText } from 'lucide-react';
 import { ImageGenerationPanel } from './ImageGenerationPanel';
 
-// Each page type maps to how it's grounded: university/course/specialization have a real
-// Content Studio facts schema (paste JSON); category/blog have none at all - they're authored as
-// a dropped .docx instead (see image_pipeline's DOCX_DRIVEN_PAGE_TYPES).
+// Each page type maps to how it's grounded: course/specialization have a real Content Studio
+// facts schema (paste JSON); category/blog have none at all - they're authored as a dropped
+// .docx instead (see image_pipeline's DOCX_DRIVEN_PAGE_TYPES). University is absent - it doesn't
+// generate images at all.
 const PAGE_TYPE_OPTIONS = [
-  { value: 'university', label: 'University Page', input: 'json' },
   { value: 'course', label: 'Course Page', input: 'json' },
   { value: 'specialization', label: 'Specialization Page', input: 'json' },
   { value: 'category', label: 'Category Page', input: 'docx' },
@@ -17,7 +17,7 @@ const PAGE_TYPE_OPTIONS = [
 // then paste JSON or drop a .docx depending on which) that hands off to the same
 // ImageGenerationPanel the draft-linked flow uses, in 'standalone-json' or 'standalone-docx' mode.
 export const StandaloneImageGeneratorPanel = ({ onClose }) => {
-  const [pageType, setPageType] = useState('university');
+  const [pageType, setPageType] = useState('course');
   const [jsonText, setJsonText] = useState('');
   const [docxFile, setDocxFile] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -106,7 +106,7 @@ export const StandaloneImageGeneratorPanel = ({ onClose }) => {
                 rows={16}
                 value={jsonText}
                 onChange={(e) => setJsonText(e.target.value)}
-                placeholder='{ "university_name": "NMIMS", "mode_of_learning": "100% Online", ... }'
+                placeholder='{ "program_name": "MBA in General Management", "university_name": "NMIMS", "mode": "100% Online", ... }'
                 spellCheck={false}
                 className="w-full mt-1 bg-black/20 border border-white/10 rounded px-2 py-2 text-[11px] font-mono text-gray-100 outline-none focus:border-orange/50 resize-none"
               />

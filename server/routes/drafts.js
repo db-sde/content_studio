@@ -397,6 +397,21 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
   const title = (titleField && draft.form_data[titleField]) || 'Untitled';
   const acfFields = transformToACF(draft.form_data, draft.page_type);
 
+  // If this draft has generated marketing images (university never does; course/specialization/
+  // category get 1, blog gets 4 — see image_pipeline), fold their Cloudinary URLs into the same
+  // ACF payload under `<role>_image` so they publish alongside the rest of the page's content in
+  // one action. Not required — a draft with no generated images just publishes without these keys.
+  try {
+    const generationStatus = await getGenerationStatus(draft.id);
+    for (const [role, image] of Object.entries(generationStatus.images || {})) {
+      if (image?.status === 'succeeded' && image.url) {
+        acfFields[`${role}_image`] = image.url;
+      }
+    }
+  } catch (e) {
+    if (!/no generation job found/i.test(e.message)) throw e;
+  }
+
   const { id: wordpressPostId, link } = await publishDraftToWordPress({
     pageType: draft.page_type,
     title,
@@ -428,6 +443,11 @@ function requireSeniorOrAdminForImagePipeline(req) {
 draftsRouter.post('/:id/generate-images', asyncRoute(async (req, res) => {
   const draft = await loadDraftOr404(req.params.id);
   requireSeniorOrAdminForImagePipeline(req);
+  // University pages don't generate images at all — the pipeline's own PageType schema would
+  // reject this too, but checking here gives a clear, specific error instead of a raw 422.
+  if (draft.page_type === 'university') {
+    const err = new Error('University pages do not generate images'); err.status = 400; throw err;
+  }
   if (!IMAGE_PIPELINE_ELIGIBLE_STATUSES.has(draft.status)) {
     const err = new Error('Images can only be generated once this draft has been sent to Admin review'); err.status = 409; throw err;
   }

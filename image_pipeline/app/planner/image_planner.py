@@ -1,11 +1,16 @@
 """Image Planner — turns page_json into an ImageSpecSet.
 
-Deliberately rule-based, not LLM-driven, for the JSON-driven page types (university/course/
-specialization): the page_type + which sections a page has is already known ahead of time from
-Content Studio's own schema (content_studio/src/config/schemas.js), so purpose/placement/priority
-is a fixed, deterministic mapping per page type rather than something needing creative judgment.
-That judgment is reserved for the Prompt Generator (next stage), which does need an LLM to turn
-"this image is the hero banner" into an actual visual description grounded in this specific page.
+University pages generate no images at all - not in ROLES_BY_PAGE_TYPE below, so plan_images()
+raises a clear error if ever called with page_type="university" (the API layer rejects this
+before it gets here - see app.schemas.api.PageType).
+
+Deliberately rule-based, not LLM-driven, for the JSON-driven page types (course/specialization):
+the page_type + which sections a page has is already known ahead of time from Content Studio's
+own schema (content_studio/src/config/schemas.js), so purpose/placement/priority is a fixed,
+deterministic mapping per page type rather than something needing creative judgment. That
+judgment is reserved for the Prompt Generator (next stage), which turns "this image is the hero
+banner" into an actual visual brief grounded in this specific page - see app.prompts.templates
+for the brand's exact per-page-type creative requirements (headline format, chip counts, etc).
 
 Category and blog pages have no such JSON behind them - they're authored as a dropped .docx
 instead - so their specs are fixed, hardcoded briefs per role rather than derived from page_json
@@ -19,33 +24,33 @@ from app.schemas.spec import ImageRole, ImageSpec, ImageSpecSet
 DOCX_DRIVEN_PAGE_TYPES = {"category", "blog"}
 
 # How many images (and which roles) each page type gets. Only blog is a multi-image (hero + 3
-# supporting) page - every other page type, including the JSON-driven ones, is single-image.
+# supporting) page - every other page type is single-image. University is deliberately absent -
+# it generates no images.
 ROLES_BY_PAGE_TYPE: dict[str, list[ImageRole]] = {
-    "university": ["hero"],
     "course": ["hero"],
     "specialization": ["hero"],
     "category": ["hero"],
     "blog": ["hero", "body1", "body2", "body3"],
 }
 
-# JSON-driven templates - university/course/specialization each get one hero image.
+# JSON-driven templates - course/specialization each get one hero image. source_fields lists
+# every fact the brand's brief for that page type actually wants to ground the highlight
+# points/subject-specific visual cues in (see app.prompts.templates.COURSE_SYSTEM_PROMPT /
+# SPECIALIZATION_SYSTEM_PROMPT) - deliberately more than a bare name field, since the brief picks
+# 3-5 highlights (course) or subject-specific cues (specialization) from whatever's actually given.
 _JSON_TEMPLATES: dict[str, dict] = {
-    "university": {
-        "name_field": "university_name",
-        "hero": dict(
-            purpose="Establish premium, trustworthy first impression of {name} as a higher-education brand",
-            placement="Full-width banner at the top of the page",
-            visual_objective="Convey credibility and modern online/distance learning for a serious adult learner audience",
-            source_fields=["university_name", "university_full_name", "established_year", "naac_grade", "ugc_approved", "mode_of_learning"],
-        ),
-    },
     "course": {
         "name_field": "program_name",
         "hero": dict(
             purpose="Establish premium first impression of {name} as a specific degree program",
             placement="Full-width banner at the top of the page",
             visual_objective="Convey the program's professional/academic identity and credibility",
-            source_fields=["program_name", "university_name", "duration", "mode", "naac_grade", "ugc_status"],
+            source_fields=[
+                # No fee field here on purpose - the brand brief for this page type explicitly
+                # restricts exact fees from ever appearing in the image.
+                "program_name", "university_name", "duration", "mode", "naac_grade", "ugc_status",
+                "eligibility_summary",
+            ],
         ),
     },
 }

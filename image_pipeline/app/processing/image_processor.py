@@ -24,6 +24,18 @@ TARGET_DIMENSIONS: dict[str, tuple[int, int]] = {
     "body3": (1200, 800),
 }
 
+# Specialization's hero is deliberately 4:3 (1200x900), not the default 16:9, per the brand's
+# master prompt brief's two-column layout - every other page type's hero stays the default above.
+_PAGE_TYPE_DIMENSION_OVERRIDES: dict[str, dict[str, tuple[int, int]]] = {
+    "specialization": {"hero": (1200, 900)},
+}
+
+
+def get_target_dimensions(role: str, page_type: str | None = None) -> tuple[int, int] | None:
+    if page_type and role in _PAGE_TYPE_DIMENSION_OVERRIDES.get(page_type, {}):
+        return _PAGE_TYPE_DIMENSION_OVERRIDES[page_type][role]
+    return TARGET_DIMENSIONS.get(role)
+
 _QUALITY_START = 82
 _QUALITY_FLOOR = 40
 _QUALITY_STEP = 8
@@ -39,12 +51,14 @@ class ProcessedImage:
     size_bytes: int
 
 
-def process_image(image_bytes: bytes, *, role: str | None = None, max_size_bytes: int | None = None) -> ProcessedImage:
+def process_image(
+    image_bytes: bytes, *, role: str | None = None, page_type: str | None = None, max_size_bytes: int | None = None
+) -> ProcessedImage:
     settings = get_settings()
     target_size = max_size_bytes or settings.max_image_size_bytes
 
     image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    target_dims = TARGET_DIMENSIONS.get(role or "")
+    target_dims = get_target_dimensions(role or "", page_type)
     if target_dims:
         image = image.resize(target_dims, Image.LANCZOS)
 

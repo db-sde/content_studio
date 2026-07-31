@@ -2057,8 +2057,10 @@ function ContentStudioApp() {
                     not during intern_editing/senior_review, when facts/content can still change
                     underneath them. Available to both Senior and Admin from that point on
                     (admin_review through approved), matching this app's existing "Senior and
-                    Admin both always have full access" permission model elsewhere. */}
+                    Admin both always have full access" permission model elsewhere. University
+                    pages don't generate images at all. */}
                 {(currentUser.role === 'senior' || currentUser.role === 'admin') &&
+                  activePageType !== PAGE_TYPES.UNIVERSITY &&
                   (draftStatus === 'admin_review' || draftStatus === 'approved') && (
                   <button
                     type="button"

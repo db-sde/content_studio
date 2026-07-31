@@ -11,8 +11,9 @@ import { generateImages, generateImagesFromDocx, getGenerationStatus, getImageHi
 export const imagePipelineRouter = Router();
 
 // JSON-driven page types (a real Content Studio schema exists) get pasted-JSON generation;
-// docx-driven ones (no facts schema at all) get the .docx dropzone below instead.
-const JSON_PAGE_TYPES = new Set(['university', 'course', 'specialization']);
+// docx-driven ones (no facts schema at all) get the .docx dropzone below instead. University is
+// absent from both — it does not generate images at all.
+const JSON_PAGE_TYPES = new Set(['course', 'specialization']);
 const DOCX_PAGE_TYPES = new Set(['category', 'blog']);
 
 // Memory storage, not disk — the file only needs to survive the single forward-to-Python-service

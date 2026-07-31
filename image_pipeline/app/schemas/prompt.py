@@ -1,15 +1,29 @@
 from pydantic import BaseModel, Field
 
+
+# Every remaining page type (course/specialization/category/blog - university generates no images
+# at all) deliberately wants real on-image typography (a headline, chips, a subheading) baked into
+# the hero, per the brand's master prompt brief - so unlike an earlier version of this list,
+# "text"/"written words"/"letters" are NOT suppressed here. Everything else the brief explicitly
+# restricts still is. Note: current FLUX Schnell generations render on-image text imperfectly
+# (misspellings/garbled glyphs are a known limitation of fast diffusion models), not a prompt issue.
 DEFAULT_NEGATIVE_PROMPT = [
-    "text",
-    "logo",
+    "invented university logo",
+    "invented seal",
+    "trademark violation",
     "watermark",
     "low quality",
     "blur",
-    "pricing table",
-    "university name",
-    "written words",
-    "letters",
+    "misspelled text",
+    "garbled typography",
+    "fake statistics",
+    "scholarship badge",
+    "promotional sticker",
+    "sale banner",
+    "admission countdown",
+    "apply now button",
+    "exact fee amount",
+    "ranking badge",
 ]
 
 

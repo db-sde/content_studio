@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.core.security import require_pipeline_key
@@ -23,15 +23,17 @@ router = APIRouter(dependencies=[Depends(require_pipeline_key)])
 
 
 @router.post("/generate-images", response_model=GenerateImagesResponse, status_code=202)
-def generate_images(req: GenerateImagesRequest, session: Session = Depends(get_db)):
+def generate_images(req: GenerateImagesRequest, background_tasks: BackgroundTasks, session: Session = Depends(get_db)):
     result = generation_service.start_generation_job(
         session, page_json=req.page_json, page_type=req.page_type, external_ref=req.external_ref,
+        background_tasks=background_tasks,
     )
     return GenerateImagesResponse(**result)
 
 
 @router.post("/generate-images-from-docx", response_model=GenerateImagesResponse, status_code=202)
 def generate_images_from_docx(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     page_type: str = Form(...),
     external_ref: str = Form(...),
@@ -47,6 +49,7 @@ def generate_images_from_docx(
 
     result = generation_service.start_generation_job(
         session, page_json={"docx_text": text}, page_type=page_type, external_ref=external_ref,
+        background_tasks=background_tasks,
     )
     return GenerateImagesResponse(**result)
 

@@ -1,9 +1,9 @@
 """Orchestration layer the routers call into - the only place that wires together the planner,
-prompt generator, Celery chord, and repositories for each of the 7 REST endpoints."""
+prompt generator, background job runner, and repositories for each of the 7 REST endpoints."""
 
 import json
 
-from celery import chord, group
+from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 
 from app.planner.image_planner import ROLES_BY_PAGE_TYPE, plan_images
@@ -17,20 +17,22 @@ from app.schemas.api import (
 )
 from app.schemas.prompt import StructuredPrompt
 from app.schemas.spec import ImageRole, ImageSpec
-from app.tasks.generation_tasks import generate_single_image_task, finalize_job_task, regenerate_single_image_task
+from app.tasks.generation_tasks import regenerate_single_image, run_generation_job
 
 
-def start_generation_job(session: Session, *, page_json: dict, page_type: str, external_ref: str) -> dict:
+def start_generation_job(
+    session: Session, *, page_json: dict, page_type: str, external_ref: str, background_tasks: BackgroundTasks,
+) -> dict:
     roles = ROLES_BY_PAGE_TYPE[page_type]
     job = jobs_repo.create_job(session, external_ref=external_ref, page_type=page_type, page_json=page_json)
     for role in roles:
         images_repo.get_or_create(session, job_id=job.id, image_role=role)
     jobs_repo.set_status(session, job, "processing")
 
-    # A chord: all of this page type's images run in parallel, finalize_job_task fires once they
-    # all finish (regardless of individual success/failure - see generation_tasks.py's per-image
-    # try/except). 1 image for most page types, 4 (hero + 3 supporting) for blog.
-    chord(group(generate_single_image_task.s(job.id, role) for role in roles))(finalize_job_task.s(job.id))
+    # Scheduled to run after this request's response is sent - run_generation_job generates every
+    # role concurrently (a thread pool, not a broker-backed queue) then finalizes the job status.
+    # 1 image for most page types, 4 (hero + 3 supporting) for blog.
+    background_tasks.add_task(run_generation_job, job.id, roles)
 
     return {"job_id": job.id, "status": job.status}
 
@@ -108,11 +110,10 @@ def get_image_history(session: Session, image_id: int) -> ImageHistoryResponse |
 
 
 def regenerate_image(image_id: int, *, prompt_override: StructuredPrompt | None, created_by: str | None) -> dict:
-    """Runs synchronously (calling the Celery task function directly rather than via the
-    broker) - a single-image regeneration is fast enough to complete within one HTTP request,
-    and the caller needs the resulting version_id back immediately."""
+    """Runs synchronously, in-process - a single-image regeneration is fast enough to complete
+    within one HTTP request, and the caller needs the resulting version_id back immediately."""
     override_dict = prompt_override.model_dump() if prompt_override is not None else None
-    return regenerate_single_image_task(image_id, override_dict, created_by)
+    return regenerate_single_image(image_id, override_dict, created_by)
 
 
 def patch_prompt(session: Session, image_id: int, structured_prompt: StructuredPrompt) -> dict:

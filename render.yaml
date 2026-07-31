@@ -1,12 +1,13 @@
 # Render Blueprint for the image_pipeline/ Python service ONLY - the existing Node app
 # (content_studio itself) was set up manually in the Render dashboard and is untouched by this
-# file. Deploying this blueprint creates 3 new resources: the FastAPI web service, the Celery
-# worker, and a managed Redis instance for them to share as the task broker.
+# file. Deploying this blueprint creates 1 new resource: a single FastAPI web service.
 #
-# IMPORTANT: storage_backend must be "r2", not "local", on Render. The web service and worker
-# below are separate instances that do NOT share a filesystem - a locally-stored image written
-# by the worker would be invisible to the web service serving /media. Local disk storage only
-# works for single-machine local dev (worker + web on the same box, as tested), never here.
+# No Celery/Redis, no separate worker: at this project's usage level (an occasional admin action,
+# not a high-throughput pipeline), a broker-backed task queue was more infrastructure than the job
+# warranted. "Generate 4 images in parallel" runs via FastAPI's own BackgroundTasks + a small
+# in-process thread pool instead (see image_pipeline/app/tasks/generation_tasks.py). Images
+# themselves go straight to Cloudinary from wherever they're generated, so no shared filesystem or
+# persistent disk is needed either.
 #
 # Env vars marked `sync: false` are secrets Render will prompt for once, during blueprint
 # creation - they are never written into this file or committed to the repo.
@@ -20,13 +21,12 @@ services:
     buildCommand: pip install -r requirements.txt
     startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.13.6 # pinned to what this was actually built/tested against - Render's default
+        # (3.14 at time of writing) is newer than pydantic-core has prebuilt wheels for, which
+        # fails the build trying to compile it from source instead.
       - key: DATABASE_URL
         sync: false # same Neon connection string the Node app already uses
-      - key: REDIS_URL
-        fromService:
-          name: content-studio-image-pipeline-redis
-          type: redis
-          property: connectionString
       - key: IMAGE_PIPELINE_API_KEY
         sync: false # self-generated shared secret - must match this same key on the Node service
       - key: PROVIDER_MODE
@@ -40,59 +40,10 @@ services:
       - key: IMAGE_PIPELINE_ANTHROPIC_MODEL
         value: claude-opus-5
       - key: STORAGE_BACKEND
-        value: r2
-      - key: R2_ACCOUNT_ID
+        value: cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
         sync: false
-      - key: R2_ACCESS_KEY_ID
+      - key: CLOUDINARY_API_KEY
         sync: false
-      - key: R2_SECRET_ACCESS_KEY
+      - key: CLOUDINARY_API_SECRET
         sync: false
-      - key: R2_BUCKET
-        sync: false
-      - key: R2_PUBLIC_BASE_URL
-        sync: false
-
-  - type: worker
-    name: content-studio-image-pipeline-worker
-    runtime: python
-    rootDir: image_pipeline
-    plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: celery -A app.tasks.celery_app worker --loglevel=info -c 2
-    envVars:
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
-        fromService:
-          name: content-studio-image-pipeline-redis
-          type: redis
-          property: connectionString
-      - key: IMAGE_PIPELINE_API_KEY
-        sync: false
-      - key: PROVIDER_MODE
-        value: live
-      - key: IMAGE_PROVIDER
-        value: flux
-      - key: FAL_KEY
-        sync: false
-      - key: ANTHROPIC_API_KEY
-        sync: false
-      - key: IMAGE_PIPELINE_ANTHROPIC_MODEL
-        value: claude-opus-5
-      - key: STORAGE_BACKEND
-        value: r2
-      - key: R2_ACCOUNT_ID
-        sync: false
-      - key: R2_ACCESS_KEY_ID
-        sync: false
-      - key: R2_SECRET_ACCESS_KEY
-        sync: false
-      - key: R2_BUCKET
-        sync: false
-      - key: R2_PUBLIC_BASE_URL
-        sync: false
-
-  - type: redis
-    name: content-studio-image-pipeline-redis
-    plan: starter
-    ipAllowList: [] # internal-only: reachable from the two services above via REDIS_URL, not from the public internet

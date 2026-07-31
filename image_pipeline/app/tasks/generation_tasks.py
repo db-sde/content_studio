@@ -1,23 +1,26 @@
-"""Celery tasks for the 4-images-in-parallel generation chord, plus single-image regeneration.
-
-One job = one `chord`: a `group` of 4 `generate_single_image_task` calls (one per image role),
-with `finalize_job_task` as the callback that rolls the 4 individual results up into the job's
-overall status. Failure of one image is caught and recorded per-image (never re-raised), so it
+"""Background image generation - one job's images run concurrently via a small thread pool
+(FastAPI's BackgroundTasks schedules run_generation_job after the response is sent), no message
+broker involved. Failure of one image is caught and recorded per-image (never re-raised), so it
 never blocks or fails the other 3 - partial success is a first-class job status, not an error.
+
+No Celery/Redis: at this project's usage level (an occasional admin action, not a high-throughput
+pipeline), a broker-backed task queue was more infrastructure than the job warranted. Each
+generation call is blocking I/O (Anthropic + FLUX HTTP calls) - ThreadPoolExecutor gives real
+concurrency for these without needing an async rewrite of the provider/prompt-generator layer.
 """
 
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 from app.db.session import session_scope
 from app.planner.image_planner import plan_images
-from app.processing.image_processor import TARGET_DIMENSIONS, process_image
+from app.processing.image_processor import get_target_dimensions, process_image
 from app.prompts.prompt_generator import generate_prompt
 from app.providers.base import NotImplementedProviderError
 from app.providers.provider_factory import get_provider
 from app.repositories import audit_repo, images_repo, jobs_repo, prompts_repo, providers_repo, versions_repo
 from app.schemas.prompt import StructuredPrompt
 from app.storage.storage_factory import get_storage_backend
-from app.tasks.celery_app import celery_app
 
 # Providers to try in order when the configured one fails - Phase 2 will populate real
 # OpenAIProvider/IdeogramProvider implementations; NotImplementedProviderError means "not
@@ -27,8 +30,16 @@ _FALLBACK_ORDER = ["flux", "openai", "ideogram"]
 _MAX_ATTEMPTS_PER_PROVIDER = 2
 
 
-@celery_app.task(name="generation.generate_single_image", bind=True)
-def generate_single_image_task(self, job_id: int, role: str) -> dict:
+def run_generation_job(job_id: int, roles: list[str]) -> None:
+    """The BackgroundTasks entry point - runs every role for this job concurrently, then
+    finalizes. Each role gets its own DB session (session_scope is not meant to be shared across
+    threads); ThreadPoolExecutor here is what used to be the Celery chord's `group`."""
+    with ThreadPoolExecutor(max_workers=max(len(roles), 1)) as executor:
+        results = list(executor.map(lambda role: generate_single_image(job_id, role), roles))
+    finalize_job(results, job_id)
+
+
+def generate_single_image(job_id: int, role: str) -> dict:
     with session_scope() as session:
         job = jobs_repo.get_job(session, job_id)
         if job is None:
@@ -46,14 +57,15 @@ def generate_single_image_task(self, job_id: int, role: str) -> dict:
 
         return _generate_and_store_version(
             session, job_id=job_id, image=image, role=role, spec=spec, structured_prompt=structured_prompt,
+            page_type=job.page_type,
         )
 
 
-@celery_app.task(name="generation.regenerate_single_image", bind=True)
-def regenerate_single_image_task(self, image_id: int, prompt_override: dict | None, created_by: str | None) -> dict:
-    """Standalone regeneration outside the 4-way chord - used by POST /regenerate-image.
-    Reuses the image's current spec (from its most recent version) rather than re-running the
-    Image Planner, since the page's structure hasn't changed, only this one image is redone."""
+def regenerate_single_image(image_id: int, prompt_override: dict | None, created_by: str | None) -> dict:
+    """Used directly (synchronously, in-process) by POST /regenerate-image - a single-image
+    regeneration is fast enough to complete within one HTTP request. Reuses the image's current
+    spec (from its most recent version) rather than re-running the Image Planner, since the
+    page's structure hasn't changed, only this one image is redone."""
     with session_scope() as session:
         image = images_repo.get(session, image_id)
         if image is None:
@@ -77,12 +89,12 @@ def regenerate_single_image_task(self, image_id: int, prompt_override: dict | No
         result = _generate_and_store_version(
             session, job_id=image.job_id, image=image, role=image.image_role, spec=spec,
             structured_prompt=structured_prompt, created_by=created_by,
+            page_type=job.page_type if job else None,
         )
         return result
 
 
-@celery_app.task(name="generation.finalize_job")
-def finalize_job_task(results: list[dict], job_id: int) -> dict:
+def finalize_job(results: list[dict], job_id: int) -> dict:
     with session_scope() as session:
         job = jobs_repo.get_job(session, job_id)
         if job is None:
@@ -101,10 +113,13 @@ def finalize_job_task(results: list[dict], job_id: int) -> dict:
         return {"job_id": job_id, "status": final_status}
 
 
-def _generate_and_store_version(session, *, job_id: int, image, role: str, spec, structured_prompt, created_by: str | None = None) -> dict:
-    """Shared by the main per-job task and standalone regeneration: try each candidate provider
-    (with a couple of retries each) until one succeeds, process + store the result, and record
-    a new version. Never raises - always returns a {role, status, ...} result dict."""
+def _generate_and_store_version(
+    session, *, job_id: int, image, role: str, spec, structured_prompt,
+    created_by: str | None = None, page_type: str | None = None,
+) -> dict:
+    """Shared by the main per-job generation and standalone regeneration: try each candidate
+    provider (with a couple of retries each) until one succeeds, process + store the result, and
+    record a new version. Never raises - always returns a {role, status, ...} result dict."""
     error_message = None
     for provider_name in _candidate_providers():
         provider = get_provider(provider_name)
@@ -113,12 +128,12 @@ def _generate_and_store_version(session, *, job_id: int, image, role: str, spec,
         # succeeds (or the last one tried, if all fail).
         assembled_text = provider.assemble_text(structured_prompt)
         prompt_row = prompts_repo.create(session, structured_prompt=structured_prompt, assembled_text=assembled_text)
-        target_w, target_h = TARGET_DIMENSIONS.get(role, (1600, 900))
+        target_w, target_h = get_target_dimensions(role, page_type) or (1600, 900)
         for _ in range(_MAX_ATTEMPTS_PER_PROVIDER):
             try:
                 generated = provider.generate(structured_prompt, width=target_w, height=target_h)
                 provider_row = providers_repo.get_by_name(session, provider.name)
-                processed = process_image(generated.image_bytes, role=role)
+                processed = process_image(generated.image_bytes, role=role, page_type=page_type)
                 storage = get_storage_backend()
                 key = f"job_{job_id}/{role}_v{_next_version_number(session, image.id)}.webp"
                 url = storage.save(key=key, data=processed.image_bytes, content_type="image/webp")
