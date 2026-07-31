@@ -38,6 +38,13 @@ ROLES_BY_PAGE_TYPE: dict[str, list[ImageRole]] = {
 # points/subject-specific visual cues in (see app.prompts.templates.COURSE_SYSTEM_PROMPT /
 # SPECIALIZATION_SYSTEM_PROMPT) - deliberately more than a bare name field, since the brief picks
 # 3-5 highlights (course) or subject-specific cues (specialization) from whatever's actually given.
+#
+# course and specialization are NOT the same shape in Content Studio's own schema
+# (content_studio/src/config/schemas.js) - course's name field is program_name, specialization's
+# is spec_name. An earlier version of this file reused the course dict wholesale for
+# specialization, which silently meant the specialization's own name was never actually looked up
+# (page_json.get("program_name") is never present on a specialization page) - each gets its own
+# entry now.
 _JSON_TEMPLATES: dict[str, dict] = {
     "course": {
         "name_field": "program_name",
@@ -53,10 +60,19 @@ _JSON_TEMPLATES: dict[str, dict] = {
             ],
         ),
     },
+    "specialization": {
+        "name_field": "spec_name",
+        "hero": dict(
+            purpose="Establish premium first impression of {name} as a specific specialization track",
+            placement="Full-width banner at the top of the page",
+            visual_objective="Convey the specialization's professional/academic identity and credibility",
+            source_fields=[
+                "spec_name", "university_name", "duration", "mode", "naac_grade", "ugc_status",
+                "eligibility_summary",
+            ],
+        ),
+    },
 }
-# Specialization pages follow the same shape as course pages in Content Studio's schema - reuse
-# the course template rather than duplicating it.
-_JSON_TEMPLATES["specialization"] = _JSON_TEMPLATES["course"]
 
 # Docx-driven templates - fixed briefs per role, no page_json fields involved (there are none).
 _DOCX_TEMPLATES: dict[str, dict] = {

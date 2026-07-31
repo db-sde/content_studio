@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from PIL import Image
 
 from app.core.config import get_settings
+from app.processing.text_overlay import compose_overlay
+from app.schemas.prompt import OverlayText
 
 # Per-role target dimensions - hero is a wide banner; body images are more square for inline use.
 # Purely an output-format concern, so it lives here rather than in the Image Planner.
@@ -52,7 +54,8 @@ class ProcessedImage:
 
 
 def process_image(
-    image_bytes: bytes, *, role: str | None = None, page_type: str | None = None, max_size_bytes: int | None = None
+    image_bytes: bytes, *, role: str | None = None, page_type: str | None = None,
+    max_size_bytes: int | None = None, overlay: OverlayText | None = None,
 ) -> ProcessedImage:
     settings = get_settings()
     target_size = max_size_bytes or settings.max_image_size_bytes
@@ -61,6 +64,11 @@ def process_image(
     target_dims = get_target_dimensions(role or "", page_type)
     if target_dims:
         image = image.resize(target_dims, Image.LANCZOS)
+
+    # Composited after resizing (not before) so the overlay's own text/scrim sizing is relative
+    # to the final output pixel dimensions, and in the same encode pass as compression below
+    # (rather than a second WebP round-trip that would compound quality loss).
+    image = compose_overlay(image, overlay, role=role or "", page_type=page_type)
 
     quality = _QUALITY_START
     data = b""

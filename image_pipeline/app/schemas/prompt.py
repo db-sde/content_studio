@@ -1,21 +1,25 @@
 from pydantic import BaseModel, Field
 
-
-# Every remaining page type (course/specialization/category/blog - university generates no images
-# at all) deliberately wants real on-image typography (a headline, chips, a subheading) baked into
-# the hero, per the brand's master prompt brief - so unlike an earlier version of this list,
-# "text"/"written words"/"letters" are NOT suppressed here. Everything else the brief explicitly
-# restricts still is. Note: current FLUX Schnell generations render on-image text imperfectly
-# (misspellings/garbled glyphs are a known limitation of fast diffusion models), not a prompt issue.
+# Diffusion models (FLUX Schnell in particular) reliably garble or misspell any rendered text -
+# proven in production with real generations ("$harda University", "MEBA", "NAAAC Accrediited").
+# So "text"/"written words"/"letters"/typography are suppressed again here; every page type that
+# needs a headline/subheading/chips gets them from app.processing.text_overlay instead, which
+# draws real characters from a real font onto the image after generation - the image model itself
+# should only ever produce clean photography/background.
 DEFAULT_NEGATIVE_PROMPT = [
+    "text",
+    "words",
+    "letters",
+    "typography",
+    "written language",
+    "captions",
+    "labels",
     "invented university logo",
     "invented seal",
     "trademark violation",
     "watermark",
     "low quality",
     "blur",
-    "misspelled text",
-    "garbled typography",
     "fake statistics",
     "scholarship badge",
     "promotional sticker",
@@ -27,9 +31,20 @@ DEFAULT_NEGATIVE_PROMPT = [
 ]
 
 
+# The exact words that will be composited onto the image after generation (see
+# app.processing.text_overlay) - never sent to the image model itself, so there is zero risk of
+# diffusion-garbled spelling. chips is capped at a handful of short highlight labels; subheading
+# is optional (some roles - e.g. blog supporting images - never get one).
+class OverlayText(BaseModel):
+    headline: str
+    subheading: str | None = None
+    chips: list[str] = Field(default_factory=list)
+
+
 # Structured prompt object — never a raw string. Providers each turn this into their own final
 # text (see app/providers/base.py's assemble_text), so the frontend/Node side never sees or
-# stores a provider-specific prompt string, only this structured shape.
+# stores a provider-specific prompt string, only this structured shape. `overlay` is optional and
+# deliberately excluded from assemble_text - see OverlayText above.
 class StructuredPrompt(BaseModel):
     subject: str
     background: str
@@ -37,3 +52,4 @@ class StructuredPrompt(BaseModel):
     lighting: str
     style: str
     negative_prompt: list[str] = Field(default_factory=lambda: list(DEFAULT_NEGATIVE_PROMPT))
+    overlay: OverlayText | None = None

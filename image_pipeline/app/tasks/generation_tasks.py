@@ -133,7 +133,9 @@ def _generate_and_store_version(
             try:
                 generated = provider.generate(structured_prompt, width=target_w, height=target_h)
                 provider_row = providers_repo.get_by_name(session, provider.name)
-                processed = process_image(generated.image_bytes, role=role, page_type=page_type)
+                processed = process_image(
+                    generated.image_bytes, role=role, page_type=page_type, overlay=structured_prompt.overlay,
+                )
                 storage = get_storage_backend()
                 key = f"job_{job_id}/{role}_v{_next_version_number(session, image.id)}.webp"
                 url = storage.save(key=key, data=processed.image_bytes, content_type="image/webp")

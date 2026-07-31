@@ -17,12 +17,20 @@ The actual creative brief per page type - course/specialization/category get ver
 brand-defined instructions (exact headline format, chip counts, word limits, discipline-specific
 visual cues); blog gets a broader editorial brief plus a per-role addendum (hero vs. supporting
 1/2/3). See app.prompts.templates for all of these.
+
+The model also returns headline/subheading/chips text (see StructuredPrompt.overlay) - this is
+composited onto the image afterward with a real font (app.processing.text_overlay), never baked
+in by the image model itself, since diffusion models reliably garble rendered text. For
+course/specialization the LLM's headline/chips are discarded and replaced with values computed
+directly from the exact JSON facts (_deterministic_overlay) - those are real names/numbers already
+known exactly, so there's no reason to let the LLM re-guess them. Category/blog have no such
+structured source of truth, so the LLM's own grounded text is used as-is there.
 """
 
 import json
 
 from anthropic import Anthropic
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
 from app.planner.image_planner import DOCX_DRIVEN_PAGE_TYPES
@@ -33,7 +41,7 @@ from app.prompts.templates import (
     COURSE_SYSTEM_PROMPT,
     SPECIALIZATION_SYSTEM_PROMPT,
 )
-from app.schemas.prompt import DEFAULT_NEGATIVE_PROMPT, StructuredPrompt
+from app.schemas.prompt import DEFAULT_NEGATIVE_PROMPT, OverlayText, StructuredPrompt
 from app.schemas.spec import ImageSpec
 
 # Docx text is capped before being sent to the model - a sane guard against a pathologically
@@ -52,6 +60,15 @@ _DOCX_SYSTEM_PROMPTS: dict[str, str] = {
     "category": CATEGORY_SYSTEM_PROMPT,
 }
 
+# The exact field name each JSON-driven page type's name comes from in Content Studio's own
+# schema (content_studio/src/config/schemas.js) - course uses program_name, specialization uses
+# spec_name. These are NOT the same field, so this must be looked up per page_type rather than
+# assumed to be one shared key.
+_NAME_FIELD_BY_JSON_PAGE_TYPE: dict[str, str] = {
+    "course": "program_name",
+    "specialization": "spec_name",
+}
+
 
 class _LLMPromptFields(BaseModel):
     subject: str
@@ -59,6 +76,9 @@ class _LLMPromptFields(BaseModel):
     composition: str
     lighting: str
     style: str
+    headline: str
+    subheading: str | None = None
+    chips: list[str] = Field(default_factory=list)
 
 
 class PromptGenerationError(RuntimeError):
@@ -67,6 +87,21 @@ class PromptGenerationError(RuntimeError):
 
 def _facts_for_spec(page_json: dict, spec: ImageSpec) -> dict:
     return {key: page_json.get(key) for key in spec.source_fields if page_json.get(key)}
+
+
+def _deterministic_overlay(page_json: dict, *, page_type: str) -> OverlayText:
+    """Course/specialization headlines are just "[University Name] [Program/Specialization
+    Name]" and chips are just whichever short facts (mode/duration/accreditation) are present -
+    all values already known exactly from page_json, so compute them directly rather than trust
+    an LLM to copy them correctly."""
+    university = (page_json.get("university_name") or "").strip()
+    name = (page_json.get(_NAME_FIELD_BY_JSON_PAGE_TYPE[page_type]) or "").strip()
+    headline = f"{university} {name}".strip() if university else name
+
+    chip_candidates = [page_json.get("mode"), page_json.get("duration"), page_json.get("naac_grade") or page_json.get("ugc_status")]
+    chips = [c.strip() for c in chip_candidates if c and c.strip()][:3]
+
+    return OverlayText(headline=headline or "Online Program", chips=chips)
 
 
 def _call_model(system_prompt: str, user_content: str) -> StructuredPrompt:
@@ -94,6 +129,7 @@ def _call_model(system_prompt: str, user_content: str) -> StructuredPrompt:
         lighting=fields.lighting,
         style=fields.style,
         negative_prompt=list(DEFAULT_NEGATIVE_PROMPT),
+        overlay=OverlayText(headline=fields.headline, subheading=fields.subheading, chips=fields.chips[:3]),
     )
 
 
@@ -106,7 +142,11 @@ def _generate_from_facts(page_json: dict, spec: ImageSpec, *, page_type: str) ->
         f"Grounding facts (JSON) - use these exact real names/values, never invent ones not "
         f"present here: {json.dumps(facts, ensure_ascii=False)}"
     )
-    return _call_model(system_prompt, user_content)
+    structured_prompt = _call_model(system_prompt, user_content)
+    # Replace whatever the LLM guessed for headline/chips with the exact real values - see
+    # _deterministic_overlay's docstring for why.
+    structured_prompt.overlay = _deterministic_overlay(page_json, page_type=page_type)
+    return structured_prompt
 
 
 def _generate_from_docx_text(docx_text: str, spec: ImageSpec, *, page_type: str) -> StructuredPrompt:
@@ -120,7 +160,11 @@ def _generate_from_docx_text(docx_text: str, spec: ImageSpec, *, page_type: str)
         f"Placement: {spec.placement}\n"
         f"Source document text:\n{trimmed}"
     )
-    return _call_model(system_prompt, user_content)
+    structured_prompt = _call_model(system_prompt, user_content)
+    if page_type == "blog" and spec.role != "hero":
+        # Only the blog hero gets a composited headline - supporting images 1-3 are clean visuals.
+        structured_prompt.overlay = None
+    return structured_prompt
 
 
 def generate_prompt(page_json: dict, spec: ImageSpec, *, page_type: str) -> StructuredPrompt:
