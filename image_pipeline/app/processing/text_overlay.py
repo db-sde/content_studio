@@ -72,24 +72,24 @@ def _draw_banner_layout(draw: ImageDraw.ImageDraw, size: tuple[int, int], overla
 
     pad_x = int(width * 0.055)
     text_width = width - 2 * pad_x
-    # Anchor moved up slightly (0.34 -> 0.38) to make room for the larger font sizes below
-    # without the chip row running past the bottom edge of the frame.
-    cursor_y = height - int(height * 0.38)
+    # Anchor moved up again (0.38 -> 0.42) to make room for the larger font sizes below without
+    # the chip row running past the bottom edge of the frame.
+    cursor_y = height - int(height * 0.42)
 
-    draw.rectangle([(pad_x, cursor_y), (pad_x + 56, cursor_y + 5)], fill=_ACCENT)
-    cursor_y += 22
+    draw.rectangle([(pad_x, cursor_y), (pad_x + 64, cursor_y + 6)], fill=_ACCENT)
+    cursor_y += 24
 
     cursor_y = _draw_wrapped_text(
         draw, overlay.headline, _FONT_BOLD, pad_x, cursor_y, text_width,
-        start_size=74, min_size=40, fill=_WHITE, max_lines=2, shadow=True,
+        start_size=84, min_size=46, fill=_WHITE, max_lines=2, shadow=True,
     )
     if overlay.subheading:
         cursor_y = _draw_wrapped_text(
             draw, overlay.subheading, _FONT_MEDIUM, pad_x, cursor_y + 10, text_width,
-            start_size=32, min_size=21, fill=_SUBTEXT, max_lines=1,
+            start_size=36, min_size=24, fill=_SUBTEXT, max_lines=1,
         )
     if overlay.chips:
-        _draw_chips_row(draw, overlay.chips, pad_x, cursor_y + 18, max_width=text_width)
+        _draw_chips_row(draw, overlay.chips, pad_x, cursor_y + 20, max_width=text_width)
 
 
 def _draw_panel_layout(draw: ImageDraw.ImageDraw, size: tuple[int, int], overlay: OverlayText) -> None:
@@ -111,12 +111,12 @@ def _draw_panel_layout(draw: ImageDraw.ImageDraw, size: tuple[int, int], overlay
 
     cursor_y = _draw_wrapped_text(
         draw, overlay.headline, _FONT_BOLD, pad_x, cursor_y, text_width,
-        start_size=56, min_size=34, fill=_WHITE, max_lines=3, shadow=True,
+        start_size=66, min_size=40, fill=_WHITE, max_lines=3, shadow=True,
     )
     if overlay.subheading:
         cursor_y = _draw_wrapped_text(
             draw, overlay.subheading, _FONT_MEDIUM, pad_x, cursor_y + 12, text_width,
-            start_size=27, min_size=19, fill=_SUBTEXT, max_lines=2,
+            start_size=31, min_size=22, fill=_SUBTEXT, max_lines=2,
         )
     if overlay.chips:
         _draw_chips_stacked(draw, overlay.chips, pad_x, cursor_y + 24, max_width=text_width)
@@ -174,8 +174,8 @@ def _draw_wrapped_text(
 
 
 def _draw_chips_row(draw: ImageDraw.ImageDraw, chips: list[str], x: int, y: int, *, max_width: int) -> None:
-    font = ImageFont.truetype(str(_FONT_SEMIBOLD), 24)
-    pad_x, pad_y, gap = 18, 10, 14
+    font = ImageFont.truetype(str(_FONT_SEMIBOLD), 27)
+    pad_x, pad_y, gap = 20, 11, 14
     cursor_x = x
     for chip in chips[:4]:
         bbox = draw.textbbox((0, 0), chip, font=font)
@@ -191,8 +191,8 @@ def _draw_chips_row(draw: ImageDraw.ImageDraw, chips: list[str], x: int, y: int,
 
 
 def _draw_chips_stacked(draw: ImageDraw.ImageDraw, chips: list[str], x: int, y: int, *, max_width: int) -> None:
-    font = ImageFont.truetype(str(_FONT_SEMIBOLD), 22)
-    pad_x, pad_y, gap = 16, 9, 12
+    font = ImageFont.truetype(str(_FONT_SEMIBOLD), 25)
+    pad_x, pad_y, gap = 18, 10, 12
     for chip in chips[:3]:
         bbox = draw.textbbox((0, 0), chip, font=font)
         box_w = min((bbox[2] - bbox[0]) + pad_x * 2, max_width)

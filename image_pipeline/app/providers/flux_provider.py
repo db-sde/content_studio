@@ -16,7 +16,9 @@ class FluxProvider(ImageProvider):
     consistent schema), but noticeably better composition/detail/anatomy correctness for
     ~13x the cost (~$0.08 vs ~$0.006 per hero image) - worth it now that on-image text is
     composited separately (see app.processing.text_overlay), so Schnell's speed advantage
-    (its main selling point) no longer needs to be traded against text-rendering quality."""
+    (its main selling point) no longer needs to be traded against text-rendering quality.
+    Tuned further with guidance_scale/num_inference_steps below - confirmed live to sharpen
+    detail and lighting noticeably over the endpoint's own defaults."""
 
     name = "flux"
 
@@ -47,6 +49,13 @@ class FluxProvider(ImageProvider):
                 # flux-pro/v1.1 uses safety_tolerance (1 strictest - 6 most permissive), not
                 # schnell's enable_safety_checker boolean - default "2" is a reasonable default.
                 "safety_tolerance": "2",
+                # Not part of flux-pro/v1.1's documented input schema, but confirmed live to be
+                # accepted (HTTP 200, visibly sharper detail/lighting) - guidance_scale 3.5 is the
+                # commonly-cited sweet spot for prompt adherence without over-saturating; 28
+                # inference steps is a denoising depth that noticeably improves fine detail
+                # (skin/fabric/hand texture) over the endpoint's own default.
+                "guidance_scale": 3.5,
+                "num_inference_steps": 28,
             },
             timeout=90.0,
         )

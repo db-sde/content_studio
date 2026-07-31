@@ -131,9 +131,26 @@ def _is_grounded_headline(headline: str, name: str) -> bool:
 def _deterministic_chips(page_json: dict) -> list[str]:
     """Chips are just whichever short facts (mode/duration/accreditation) are present - always
     computed directly from page_json since these are exact values with no merging/wording
-    judgement involved."""
-    chip_candidates = [page_json.get("mode"), page_json.get("duration"), page_json.get("naac_grade") or page_json.get("ugc_status")]
-    return [c.strip() for c in chip_candidates if c and c.strip()][:3]
+    judgement involved. naac_grade is often entered as just the bare grade ("A", "A+", "A++")
+    rather than "NAAC A++" - shown bare, a chip just reading "A" is meaningless without context,
+    so it's prefixed with "NAAC" unless that word (or "UGC", for the ugc_status fallback) is
+    already present in the value."""
+    chips = []
+    mode = (page_json.get("mode") or "").strip()
+    if mode:
+        chips.append(mode)
+    duration = (page_json.get("duration") or "").strip()
+    if duration:
+        chips.append(duration)
+
+    naac = (page_json.get("naac_grade") or "").strip()
+    ugc = (page_json.get("ugc_status") or "").strip()
+    if naac:
+        chips.append(naac if "naac" in naac.lower() else f"NAAC {naac}")
+    elif ugc:
+        chips.append(ugc if "ugc" in ugc.lower() else f"UGC {ugc}")
+
+    return chips[:3]
 
 
 def _call_model(system_prompt: str, user_content: str) -> StructuredPrompt:
