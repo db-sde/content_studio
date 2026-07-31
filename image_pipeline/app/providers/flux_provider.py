@@ -6,19 +6,17 @@ from app.core.config import get_settings
 from app.providers.base import GeneratedImage, ImageProvider
 from app.schemas.prompt import StructuredPrompt
 
-_FAL_RUN_URL = "https://fal.run/fal-ai/flux-pro/v1.1"
+_FAL_RUN_URL = "https://fal.run/fal-ai/flux/dev"
 
 
 class FluxProvider(ImageProvider):
-    """Wraps FLUX 1.1 [pro] via fal.ai's synchronous REST endpoint (fal.run, not the queue
+    """Wraps FLUX.1 [dev] via fal.ai's synchronous REST endpoint (fal.run, not the queue
     endpoint - still fast enough for a direct blocking call within a background task).
-    Upgraded from FLUX Schnell: same input/output shape (fal.run's flux family shares a
-    consistent schema), but noticeably better composition/detail/anatomy correctness for
-    ~13x the cost (~$0.08 vs ~$0.006 per hero image) - worth it now that on-image text is
-    composited separately (see app.processing.text_overlay), so Schnell's speed advantage
-    (its main selling point) no longer needs to be traded against text-rendering quality.
-    Tuned further with guidance_scale/num_inference_steps below - confirmed live to sharpen
-    detail and lighting noticeably over the endpoint's own defaults."""
+    Settled here after trying Schnell (~$0.003/MP, garbled on-image text - since fixed by
+    compositing text separately, see app.processing.text_overlay) and Pro 1.1 (~$0.04/MP,
+    didn't read as meaningfully better for the cost). Dev (~$0.025/MP) is the middle tier -
+    unlike Pro 1.1, guidance_scale/num_inference_steps are actually first-class documented
+    params here (not just accepted-but-undocumented), so the same tuning applies cleanly."""
 
     name = "flux"
 
@@ -46,14 +44,12 @@ class FluxProvider(ImageProvider):
                 "image_size": {"width": width, "height": height},
                 "num_images": 1,
                 "output_format": "png",
-                # flux-pro/v1.1 uses safety_tolerance (1 strictest - 6 most permissive), not
-                # schnell's enable_safety_checker boolean - default "2" is a reasonable default.
-                "safety_tolerance": "2",
-                # Not part of flux-pro/v1.1's documented input schema, but confirmed live to be
-                # accepted (HTTP 200, visibly sharper detail/lighting) - guidance_scale 3.5 is the
-                # commonly-cited sweet spot for prompt adherence without over-saturating; 28
-                # inference steps is a denoising depth that noticeably improves fine detail
-                # (skin/fabric/hand texture) over the endpoint's own default.
+                # flux/dev uses enable_safety_checker (boolean), same as schnell - unlike
+                # flux-pro/v1.1's safety_tolerance string enum.
+                "enable_safety_checker": True,
+                # Both are first-class documented params for this endpoint (default values are
+                # actually the same 3.5/28 dev already defaults to - set explicitly so they don't
+                # silently drift if fal.ai ever changes the endpoint's own defaults).
                 "guidance_scale": 3.5,
                 "num_inference_steps": 28,
             },
@@ -64,7 +60,7 @@ class FluxProvider(ImageProvider):
 
         images = body.get("images") or []
         if not images:
-            raise RuntimeError(f"fal.ai FLUX 1.1 [pro] returned no images: {body}")
+            raise RuntimeError(f"fal.ai FLUX.1 [dev] returned no images: {body}")
         image_meta = images[0]
 
         image_response = httpx.get(image_meta["url"], timeout=30.0)
