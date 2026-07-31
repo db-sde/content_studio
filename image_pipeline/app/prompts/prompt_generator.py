@@ -89,6 +89,25 @@ def _facts_for_spec(page_json: dict, spec: ImageSpec) -> dict:
     return {key: page_json.get(key) for key in spec.source_fields if page_json.get(key)}
 
 
+def _build_headline(university: str, name: str) -> str:
+    """"[University Name] [Program/Specialization Name]" - except real-world data entry isn't
+    always clean (e.g. a university_name field of "Sharda University Online" plus a program_name
+    of "Sharda Online MBA" naively concatenates into "Sharda University Online Sharda Online
+    MBA"). If most of university's words already appear somewhere in name, trust that name is
+    already self-contained and skip prepending it again, rather than duplicate words."""
+    if not university:
+        return name or "Online Program"
+    if not name:
+        return university
+
+    uni_words = [w.lower() for w in university.split()]
+    name_lower = name.lower()
+    overlap = sum(1 for w in uni_words if w in name_lower) / len(uni_words)
+    if overlap >= 0.5:
+        return name
+    return f"{university} {name}"
+
+
 def _deterministic_overlay(page_json: dict, *, page_type: str) -> OverlayText:
     """Course/specialization headlines are just "[University Name] [Program/Specialization
     Name]" and chips are just whichever short facts (mode/duration/accreditation) are present -
@@ -96,7 +115,7 @@ def _deterministic_overlay(page_json: dict, *, page_type: str) -> OverlayText:
     an LLM to copy them correctly."""
     university = (page_json.get("university_name") or "").strip()
     name = (page_json.get(_NAME_FIELD_BY_JSON_PAGE_TYPE[page_type]) or "").strip()
-    headline = f"{university} {name}".strip() if university else name
+    headline = _build_headline(university, name)
 
     chip_candidates = [page_json.get("mode"), page_json.get("duration"), page_json.get("naac_grade") or page_json.get("ugc_status")]
     chips = [c.strip() for c in chip_candidates if c and c.strip()][:3]
