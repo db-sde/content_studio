@@ -6,13 +6,17 @@ from app.core.config import get_settings
 from app.providers.base import GeneratedImage, ImageProvider
 from app.schemas.prompt import StructuredPrompt
 
-_FAL_RUN_URL = "https://fal.run/fal-ai/flux/schnell"
+_FAL_RUN_URL = "https://fal.run/fal-ai/flux-pro/v1.1"
 
 
 class FluxProvider(ImageProvider):
-    """Wraps FLUX Schnell via fal.ai's synchronous REST endpoint - fal.run, not the queue
-    endpoint, since Schnell is fast enough for a direct blocking call and Celery already
-    provides the async/queue layer for this service's own workload."""
+    """Wraps FLUX 1.1 [pro] via fal.ai's synchronous REST endpoint (fal.run, not the queue
+    endpoint - still fast enough for a direct blocking call within a background task).
+    Upgraded from FLUX Schnell: same input/output shape (fal.run's flux family shares a
+    consistent schema), but noticeably better composition/detail/anatomy correctness for
+    ~13x the cost (~$0.08 vs ~$0.006 per hero image) - worth it now that on-image text is
+    composited separately (see app.processing.text_overlay), so Schnell's speed advantage
+    (its main selling point) no longer needs to be traded against text-rendering quality."""
 
     name = "flux"
 
@@ -40,16 +44,18 @@ class FluxProvider(ImageProvider):
                 "image_size": {"width": width, "height": height},
                 "num_images": 1,
                 "output_format": "png",
-                "enable_safety_checker": True,
+                # flux-pro/v1.1 uses safety_tolerance (1 strictest - 6 most permissive), not
+                # schnell's enable_safety_checker boolean - default "2" is a reasonable default.
+                "safety_tolerance": "2",
             },
-            timeout=60.0,
+            timeout=90.0,
         )
         response.raise_for_status()
         body = response.json()
 
         images = body.get("images") or []
         if not images:
-            raise RuntimeError(f"fal.ai FLUX Schnell returned no images: {body}")
+            raise RuntimeError(f"fal.ai FLUX 1.1 [pro] returned no images: {body}")
         image_meta = images[0]
 
         image_response = httpx.get(image_meta["url"], timeout=30.0)
