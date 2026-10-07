@@ -699,7 +699,10 @@ function ContentStudioApp() {
       // status at intern_editing when failures exist) so "Generate Empty Fields" can retry just
       // the ones that failed, without re-billing the fields that already succeeded.
       if (failures && failures.length) {
-        toast.error(`${failures.length} field(s) failed to generate (${failures.map(f => f.fieldKey).join(', ')}). Click Generate again to retry just those.`);
+        // Surface the actual cause (deduped - a systemic problem like an exhausted API balance
+        // fails every field with the identical message) instead of just the field names.
+        const reasons = [...new Set(failures.map(f => f.error).filter(Boolean))].slice(0, 2).join(' | ');
+        toast.error(`${failures.length} field(s) failed to generate (${failures.map(f => f.fieldKey).join(', ')})${reasons ? ` - ${reasons}` : ''}. Click Generate again to retry just those.`);
       } else {
         toast.success('All AI fields generated — this draft is now with the Senior for review.');
       }

@@ -59,6 +59,9 @@ export async function generateAllAiFields({ draftId, pageType, fields, facts, cu
 
       return { fieldKey: field.fieldKey, content: result.content, ok: true };
     } catch (e) {
+      // Logged server-side too (not just returned to the client) so the real cause - an
+      // exhausted Anthropic balance, a bad key, a timeout - is visible in the host's logs.
+      console.error(`[generate-all] field "${field.fieldKey}" failed:`, e.message || e);
       return { fieldKey: field.fieldKey, ok: false, error: e.message || 'Generation failed' };
     }
   }, CONCURRENCY);
