@@ -35,3 +35,12 @@ export async function updatePassword(userId, passwordHash) {
   const db = await getDb();
   await db.query('UPDATE users SET password_hash = $1 WHERE id = $2', [passwordHash, userId]);
 }
+
+// Interns a Senior/Admin can hand a draft to: active (not deactivated) accounts with the intern role.
+export async function listActiveInterns() {
+  const db = await getDb();
+  const { rows } = await db.query(`
+    SELECT id, name FROM users WHERE role = 'intern' AND deactivated_at IS NULL ORDER BY name ASC
+  `);
+  return rows;
+}

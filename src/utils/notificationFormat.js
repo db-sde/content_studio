@@ -6,7 +6,8 @@ export const NOTIFICATION_TYPE_VERBS = {
   sent_to_senior: 'sent for review',
   sent_to_admin: 'sent for final review',
   reverted_to_intern: 'sent back for revisions',
-  reverted_to_senior: 'sent back for revisions'
+  reverted_to_senior: 'sent back for revisions',
+  assigned_to_intern: 'assigned you'
 };
 
 // The backend's iso_now() (server/db/migrations_pg/001_init.sql) already returns a full

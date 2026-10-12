@@ -1,11 +1,12 @@
-import { Send, CornerDownRight } from 'lucide-react';
+import { Send, CornerDownRight, UserPlus } from 'lucide-react';
 import { NOTIFICATION_TYPE_VERBS, timeAgo } from '../utils/notificationFormat';
 
 const TYPE_ICON = {
   sent_to_senior: Send,
   sent_to_admin: Send,
   reverted_to_intern: CornerDownRight,
-  reverted_to_senior: CornerDownRight
+  reverted_to_senior: CornerDownRight,
+  assigned_to_intern: UserPlus
 };
 
 // Neither role has any way to know the other has acted other than through this app — this panel

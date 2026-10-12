@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { createDraft, getDraftById, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setDraftSubmittedBy, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
+import { createDraft, getDraftById, getDraftOwnerId, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setDraftSubmittedBy, setDraftAssignee, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
+import { getUserById, listActiveInterns } from '../repositories/usersRepo.js';
 import { generateAllAiFields } from '../ai/batchGenerate.js';
 import { getGenerationLogsByDraft } from '../repositories/generationLogsRepo.js';
 import { getEvaluationLogsByDraft } from '../repositories/evaluationLogsRepo.js';
@@ -36,7 +37,7 @@ const DRAFT_STATUSES = ['intern_editing', 'senior_review', 'admin_review', 'appr
 // Admin doing this already knows (nothing to notify about their own action), and nothing "sent" a
 // draft to Approved in the hand-off sense.
 const ADMIN_OVERRIDE_NOTIFY = {
-  intern_editing: (draft) => ({ type: 'reverted_to_intern', recipientUserId: draft.created_by_user_id }),
+  intern_editing: (draft) => ({ type: 'reverted_to_intern', recipientUserId: getDraftOwnerId(draft) }),
   senior_review: () => ({ type: 'reverted_to_senior', recipientRole: 'senior' })
 };
 
@@ -68,13 +69,13 @@ async function loadDraftOr404(id) {
   return draft;
 }
 
-// A draft belongs to the Intern who created it (created_by_user_id) - there is no separate
-// "assign" step, so creator and assignee are the same person (a revert-to-intern notification
-// already goes to exactly that user). Interns may only edit their own drafts; a different Intern
-// can still open one to read it, but not change it. Seniors and Admins are never restricted - they
-// review and edit every draft by design.
+// A draft belongs to one Intern at a time: whoever a Senior/Admin assigned it to, or - if it was
+// never assigned - whoever created it (see getDraftOwnerId). A revert-to-intern notification goes
+// to exactly that user. Interns may only edit drafts they own; a different Intern can still open one
+// to read it, but not change it. Seniors and Admins are never restricted - they review and edit
+// every draft by design.
 function isDraftOwnerOrNotIntern(user, draft) {
-  return user.role !== 'intern' || draft.created_by_user_id === user.id;
+  return user.role !== 'intern' || getDraftOwnerId(draft) === user.id;
 }
 
 function assertCanActAsOwner(user, draft) {
@@ -87,6 +88,15 @@ function assertCanActAsOwner(user, draft) {
 
 draftsRouter.get('/', asyncRoute(async (req, res) => {
   res.json({ drafts: await listDrafts() });
+}));
+
+// Interns a Senior/Admin can hand a draft to - registered before '/:id' so "assignable-interns"
+// isn't swallowed by the draft-id route.
+draftsRouter.get('/assignable-interns', asyncRoute(async (req, res) => {
+  if (!['senior', 'admin'].includes(req.currentUser.role)) {
+    const err = new Error('Only a senior or admin can assign drafts'); err.status = 403; throw err;
+  }
+  res.json({ interns: await listActiveInterns() });
 }));
 
 draftsRouter.post('/', asyncRoute(async (req, res) => {
@@ -148,8 +158,12 @@ draftsRouter.put('/:id', asyncRoute(async (req, res) => {
 
 draftsRouter.delete('/:id', asyncRoute(async (req, res) => {
   const draft = await loadDraftOr404(req.params.id);
-  if (!['senior', 'admin'].includes(req.currentUser.role) && draft.created_by_user_id !== req.currentUser.id) {
-    const err = new Error('Only this draft\'s creator, a senior, or an admin can delete it'); err.status = 403; throw err;
+  // An Intern may delete a draft only if they both created it AND still own it - a draft a Senior
+  // handed them to work on isn't theirs to delete, and one they created but had taken away isn't
+  // theirs any more.
+  const internMayDelete = draft.created_by_user_id === req.currentUser.id && getDraftOwnerId(draft) === req.currentUser.id;
+  if (!['senior', 'admin'].includes(req.currentUser.role) && !internMayDelete) {
+    const err = new Error('Only a senior, an admin, or the intern who created and still owns this draft can delete it'); err.status = 403; throw err;
   }
   await deleteDraft(req.params.id);
   res.json({ ok: true });
@@ -165,6 +179,50 @@ draftsRouter.patch('/:id/allow-intern-ai-edit', asyncRoute(async (req, res) => {
   const { allow } = req.body || {};
   const draft = await setAllowInternAiEdit(req.params.id, !!allow);
   res.json({ draft });
+}));
+
+// Senior/Admin hands a draft to a specific Intern. The new assignee becomes the draft's owner - the
+// only Intern who can edit it from now on - and is notified. `userId: null` clears the assignment so
+// ownership falls back to whoever created the draft. Allowed at any stage short of Approved, so a
+// bounced-back draft can be moved to a different Intern, not just a freshly created one.
+draftsRouter.patch('/:id/assign', asyncRoute(async (req, res) => {
+  const draft = await loadDraftOr404(req.params.id);
+  if (!['senior', 'admin'].includes(req.currentUser.role)) {
+    const err = new Error('Only a senior or admin can assign drafts'); err.status = 403; throw err;
+  }
+  if (draft.status === 'approved') {
+    const err = new Error('An approved draft cannot be reassigned - reopen it first'); err.status = 409; throw err;
+  }
+
+  const rawUserId = (req.body || {}).userId;
+  const userId = rawUserId === null || rawUserId === undefined ? null : Number(rawUserId);
+  if (userId !== null) {
+    if (!Number.isInteger(userId)) {
+      const err = new Error('userId must be an integer or null'); err.status = 400; throw err;
+    }
+    const target = await getUserById(userId);
+    if (!target || target.role !== 'intern' || target.deactivated_at) {
+      const err = new Error('Drafts can only be assigned to an active intern'); err.status = 400; throw err;
+    }
+  }
+
+  const previousOwnerId = getDraftOwnerId(draft);
+  const updated = await setDraftAssignee(draft.id, userId);
+  const newOwnerId = getDraftOwnerId(updated);
+
+  // Only notify an actual assignment to an intern (not an unassign, where the "new owner" is just the
+  // creator - possibly a Senior), only when the owner really changed (re-selecting the current intern
+  // is a no-op), and never notify someone about their own action.
+  if (userId !== null && newOwnerId !== previousOwnerId && newOwnerId !== req.currentUser.id) {
+    await createNotification({
+      draftId: draft.id,
+      type: 'assigned_to_intern',
+      createdByUserId: req.currentUser.id,
+      recipientUserId: newOwnerId
+    });
+  }
+
+  res.json({ draft: updated });
 }));
 
 // Batch-generates every listed AI field (client-supplied — schemas.js is the frontend's single
@@ -267,7 +325,7 @@ const STATUS_ACTIONS = {
     allowed: [{ role: 'senior', from: 'senior_review' }, { role: 'admin', from: 'admin_review' }],
     newStatus: 'intern_editing',
     priority: 'set',
-    notify: (draft) => ({ type: 'reverted_to_intern', recipientUserId: draft.created_by_user_id })
+    notify: (draft) => ({ type: 'reverted_to_intern', recipientUserId: getDraftOwnerId(draft) })
   },
   'revert-to-senior': {
     allowed: [{ role: 'admin', from: 'admin_review' }],

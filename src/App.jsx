@@ -24,6 +24,7 @@ import {
   SearchableSelect
 } from './components/FieldTypes';
 import { AiFieldToolbar } from './components/AiFieldToolbar';
+import { AssignInternMenu } from './components/AssignInternMenu';
 import { InvitePanel } from './components/InvitePanel';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import { ImageGenerationPanel } from './components/ImageGenerationPanel';
@@ -95,6 +96,12 @@ const ALL_DRAFT_STATUSES = ['intern_editing', 'senior_review', 'admin_review', '
 // draft that was bounced backwards (prioritized_at set - cleared again when its recipient sends it
 // forward), so a Senior's reverted page shows up in its own bucket instead of lingering in theirs.
 // "Duplicates" is any draft sharing its page type + university + title with another one.
+// The Intern who currently owns a draft - the one a Senior/Admin assigned it to, else its creator.
+// Falls back to the creator fields so the UI still works against a backend that hasn't yet been
+// redeployed with assignment support (no owner_* in the list response).
+const ownerIdOf = (draft) => draft.owner_user_id ?? draft.created_by_user_id;
+const ownerNameOf = (draft) => draft.owner_name ?? draft.created_by_name;
+
 const DRAFT_FILTER_KEYS = ['all', ...ALL_DRAFT_STATUSES, 'sent_back', 'duplicates'];
 const DRAFT_FILTER_LABELS = { all: 'All', ...DRAFT_STATUS_LABELS, sent_back: 'Sent Back', duplicates: 'Duplicates' };
 
@@ -259,13 +266,14 @@ function ContentStudioApp() {
   // avatar + chevron now), so this no longer needs to be measured live like the old wide pill did.
   const userBadgeClearance = 120;
   const [drafts, setDrafts] = useState([]);
-  // A draft belongs to the Intern who created it. An Intern can open another Intern's draft to
+  // A draft belongs to one Intern at a time - whoever a Senior/Admin assigned it to, or its creator
+  // if it was never assigned. An Intern can open another Intern's draft to
   // read it but not change it (the server enforces this too - see isDraftOwnerOrNotIntern in
   // server/routes/drafts.js). Seniors/Admins are never restricted. Resolved from the polled drafts
   // list (which carries created_by_user_id) rather than adding owner info to the reducer; if the
   // list hasn't caught up with a just-created draft yet, treat it as the creator's own.
   const activeDraftMeta = activeDraftId ? drafts.find(d => d.id === activeDraftId) : null;
-  const isDraftOwner = currentUser.role !== 'intern' || !activeDraftMeta || activeDraftMeta.created_by_user_id === currentUser.id;
+  const isDraftOwner = currentUser.role !== 'intern' || !activeDraftMeta || ownerIdOf(activeDraftMeta) === currentUser.id;
   const [draftsSearch, setDraftsSearch] = useState('');
   const [expandedSections, setExpandedSections] = useState({});
   const [showValidationErrors, setShowValidationErrors] = useState(false);
@@ -400,14 +408,19 @@ function ContentStudioApp() {
       // Admin sees every draft across every Intern/Senior, so "your unfinished draft" never
       // actually means the Admin's own work — the resume-prompt only makes sense for the two
       // roles that actually originate and edit drafts themselves.
-      if (list.length > 0 && !activePageTypeRef.current && currentUser?.role !== 'admin') {
-        setLatestDraft(list[0]);
+      // An Intern is only ever pointed at a draft they actually own and can still edit - not
+      // whichever draft happens to be newest in a list that shows every Intern's work.
+      const resumable = currentUser?.role === 'intern'
+        ? list.filter(d => ownerIdOf(d) === currentUser.id && d.status === 'intern_editing')
+        : list;
+      if (resumable.length > 0 && !activePageTypeRef.current && currentUser?.role !== 'admin') {
+        setLatestDraft(resumable[0]);
         setShowBanner(true);
       }
     } catch (e) {
       console.error('Error loading drafts', e);
     }
-  }, [currentUser?.role]);
+  }, [currentUser?.role, currentUser?.id]);
 
   // Neither role can otherwise tell the other has acted (new draft submitted, sent back with
   // notes, cost accrued) without this app telling them — so the home-screen list, the
@@ -512,7 +525,7 @@ function ContentStudioApp() {
   // to act on a bounced-back draft. prioritized_at used to pin it for everyone, which is why a
   // Senior's own revert-to-intern kept floating at the top of the Senior's list as if still theirs.
   const needsMyAttention = (draft) => !!draft.prioritized_at && (
-    (currentUser.role === 'intern' && draft.status === 'intern_editing' && draft.created_by_user_id === currentUser.id) ||
+    (currentUser.role === 'intern' && draft.status === 'intern_editing' && ownerIdOf(draft) === currentUser.id) ||
     (currentUser.role === 'senior' && draft.status === 'senior_review')
   );
 
@@ -527,7 +540,7 @@ function ContentStudioApp() {
     if (!query) return true;
     const haystack = [
       draft.university_name, draft.university_full_name, getDraftListTitle(draft),
-      draft.created_by_name, draft.submitted_by_name, draft.last_edited_by_name,
+      ownerNameOf(draft), draft.created_by_name, draft.submitted_by_name, draft.last_edited_by_name,
       DRAFT_STATUS_LABELS[draft.status], SCHEMA_DETAILS[draft.page_type]?.title
     ].filter(Boolean).join(' ').toLowerCase();
     return query.split(/\s+/).every(term => haystack.includes(term));
@@ -768,6 +781,23 @@ function ContentStudioApp() {
       console.error('Error loading cost summary', e);
     }
   };
+
+  // Senior/Admin: hand a draft to an Intern (or clear the assignment with userId null). The server
+  // notifies the new assignee; this just refreshes the list so the new owner shows everywhere.
+  // Throws on failure (after toasting) so the dropdown stays open for a retry.
+  const handleAssignDraft = async (draftId, userId, internName) => {
+    try {
+      await draftsClient.assignDraft(draftId, userId);
+      await refreshDraftsList();
+      toast.success(userId ? `Assigned to ${internName} - they've been notified.` : 'Assignment cleared - this draft is back with its creator.');
+    } catch (e) {
+      console.error('Error assigning draft', e);
+      toast.error(e.message || 'Failed to assign this draft');
+      throw e;
+    }
+  };
+
+  const loadAssignableInterns = async () => (await draftsClient.listAssignableInterns()).interns;
 
   // Drives both "Generate All AI Fields" (onlyEmpty: false) and the post-revert "Generate Empty
   // Fields" (onlyEmpty: true). Saves current facts to the DB first — the server's emptiness check
@@ -1939,8 +1969,21 @@ function ContentStudioApp() {
                               </span>
                             </td>
                             <td className="py-4 px-4 font-medium text-muted">{getDraftListTitle(draft)}</td>
-                            <td className="py-4 px-4">
-                              <span className="block text-xs font-bold text-navy">{draft.created_by_name}</span>
+                            <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
+                              {currentUser.role === 'intern' || draft.status === 'approved' ? (
+                                <span className="block text-xs font-bold text-navy">{ownerNameOf(draft)}</span>
+                              ) : (
+                                <AssignInternMenu
+                                  ownerName={ownerNameOf(draft)}
+                                  ownerUserId={ownerIdOf(draft)}
+                                  isAssigned={!!draft.assigned_to_user_id}
+                                  loadInterns={loadAssignableInterns}
+                                  onAssign={(userId, name) => handleAssignDraft(draft.id, userId, name)}
+                                />
+                              )}
+                              {draft.assigned_to_user_id && draft.assigned_to_user_id !== draft.created_by_user_id && (
+                                <span className="block text-[10px] text-muted mt-0.5">Created by {draft.created_by_name}</span>
+                              )}
                               {draft.submitted_by_name && (
                                 <span className="block text-[10px] text-muted mt-0.5">Submitted by {draft.submitted_by_name}</span>
                               )}
@@ -2021,11 +2064,11 @@ function ContentStudioApp() {
                             </td>
                             <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-end gap-2">
-                                {currentUser.role === 'intern' && draft.created_by_user_id !== currentUser.id ? (
+                                {currentUser.role === 'intern' && ownerIdOf(draft) !== currentUser.id ? (
                                   <button
                                     onClick={() => loadDraft(draft)}
                                     className="flex items-center gap-1 text-xs bg-off text-muted hover:text-navy font-semibold px-3 py-1.5 rounded transition-all"
-                                    title={`Assigned to ${draft.created_by_name} - view only`}
+                                    title={`Assigned to ${ownerNameOf(draft)} - view only`}
                                   >
                                     <Lock className="w-3 h-3" />
                                     View
@@ -2109,7 +2152,21 @@ function ContentStudioApp() {
                   </div>
                   {activeDraftMeta && (
                     <div className="text-[10px] text-gray-300 mt-0.5 flex items-center gap-x-2 flex-wrap">
-                      <span>Intern: <span className="font-bold text-white">{activeDraftMeta.created_by_name}</span></span>
+                      <span className="inline-flex items-center gap-1">
+                        Intern:
+                        {currentUser.role === 'intern' || draftStatus === 'approved' ? (
+                          <span className="font-bold text-white">{ownerNameOf(activeDraftMeta)}</span>
+                        ) : (
+                          <AssignInternMenu
+                            variant="header"
+                            ownerName={ownerNameOf(activeDraftMeta)}
+                            ownerUserId={ownerIdOf(activeDraftMeta)}
+                            isAssigned={!!activeDraftMeta.assigned_to_user_id}
+                            loadInterns={loadAssignableInterns}
+                            onAssign={(userId, name) => handleAssignDraft(activeDraftMeta.id, userId, name)}
+                          />
+                        )}
+                      </span>
                       {activeDraftMeta.submitted_by_name && (
                         <span>· Submitted by <span className="font-bold text-white">{activeDraftMeta.submitted_by_name}</span></span>
                       )}
@@ -2399,7 +2456,7 @@ function ContentStudioApp() {
               <div>
                 <span className="font-bold text-orange uppercase tracking-wide text-[10px]">View only</span>
                 <p className="text-xs text-navy/80 mt-0.5">
-                  This {(SCHEMA_DETAILS[activePageType]?.title || 'page').toLowerCase()} is assigned to {activeDraftMeta?.created_by_name || 'another intern'} - only they can edit it. You can read it, but your changes won't be saved.
+                  This {(SCHEMA_DETAILS[activePageType]?.title || 'page').toLowerCase()} is assigned to {(activeDraftMeta && ownerNameOf(activeDraftMeta)) || 'another intern'} - only they can edit it. You can read it, but your changes won't be saved.
                 </p>
               </div>
             </div>

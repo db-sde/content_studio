@@ -100,6 +100,15 @@ export function adminSetDraftStatus(id, targetStatus, message) {
   return patchJSON(`/api/drafts/${id}/status`, { action: 'admin-set-status', targetStatus, message });
 }
 
+// Senior/Admin only. userId null clears the assignment (the draft falls back to its creator).
+export function assignDraft(id, userId) {
+  return patchJSON(`/api/drafts/${id}/assign`, { userId });
+}
+
+export function listAssignableInterns() {
+  return getJSON('/api/drafts/assignable-interns');
+}
+
 export function setAllowInternAiEdit(id, allow) {
   return patchJSON(`/api/drafts/${id}/allow-intern-ai-edit`, { allow: !!allow });
 }

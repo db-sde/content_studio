@@ -55,7 +55,8 @@ const NOTIFICATION_TARGET_STATUS = {
   sent_to_senior: 'senior_review',
   sent_to_admin: 'admin_review',
   reverted_to_intern: 'intern_editing',
-  reverted_to_senior: 'senior_review'
+  reverted_to_senior: 'senior_review',
+  assigned_to_intern: 'intern_editing'
 };
 
 // Powers the Activity tab (distinct from the notification bell): every hand-off a user was either

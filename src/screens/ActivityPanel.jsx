@@ -87,7 +87,13 @@ export const ActivityPanel = ({ onClose, onOpenDraft }) => {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-navy">
-                        {item.direction === 'sent' ? (
+                        {item.type === 'assigned_to_intern' ? (
+                          item.direction === 'sent' ? (
+                            <>You assigned this draft to <span className="font-bold">{counterpartName(item)}</span></>
+                          ) : (
+                            <><span className="font-bold">{counterpartName(item)}</span> assigned this draft to you</>
+                          )
+                        ) : item.direction === 'sent' ? (
                           <>You {NOTIFICATION_TYPE_VERBS[item.type]} to <span className="font-bold">{counterpartName(item)}</span></>
                         ) : (
                           <><span className="font-bold">{counterpartName(item)}</span> {NOTIFICATION_TYPE_VERBS[item.type]} to you</>

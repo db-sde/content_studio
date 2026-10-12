@@ -32,8 +32,10 @@ const norm = (col) => `btrim(regexp_replace(regexp_replace(lower(coalesce(${col}
 // everything else falls back to the normal newest-updated-first order.
 //
 // Also carries, per row:
-//   - who created / last edited / submitted the draft (names, via users joins), so the list can
-//     show which Intern a specialization belongs to without a second round-trip per row;
+//   - who created / last edited / submitted the draft, and who currently OWNS it (owner_*: the
+//     assigned Intern if a Senior/Admin assigned one, otherwise the creator), as names via users
+//     joins - so the list can show which Intern a specialization belongs to without a second
+//     round-trip per row;
 //   - dup_rank / dup_total: duplicate detection. Two drafts are the same entry when they share
 //     page type + university + title (case, punctuation and filler words like "Online" ignored). dup_rank 1 is the earliest
 //     ("original"), anything higher is a repeat; dup_total is how many drafts share that key.
@@ -45,7 +47,7 @@ export async function listDrafts() {
     WITH base AS (
       SELECT
         id, page_type, status, allow_intern_ai_edit, created_by_user_id, prioritized_at, created_at, updated_at,
-        wordpress_url, submitted_by_user_id, last_edited_by_user_id,
+        wordpress_url, submitted_by_user_id, last_edited_by_user_id, assigned_to_user_id,
         (form_data_json::json)->>'university_name' AS university_name,
         (form_data_json::json)->>'university_full_name' AS university_full_name,
         (form_data_json::json)->>'program_name' AS program_name,
@@ -69,7 +71,9 @@ export async function listDrafts() {
     SELECT
       keyed.id, keyed.page_type, keyed.status, keyed.allow_intern_ai_edit, keyed.created_by_user_id,
       keyed.prioritized_at, keyed.created_at, keyed.updated_at, keyed.wordpress_url,
-      keyed.submitted_by_user_id, keyed.last_edited_by_user_id,
+      keyed.submitted_by_user_id, keyed.last_edited_by_user_id, keyed.assigned_to_user_id,
+      COALESCE(keyed.assigned_to_user_id, keyed.created_by_user_id) AS owner_user_id,
+      owner.name AS owner_name,
       keyed.university_name, keyed.university_full_name, keyed.program_name, keyed.spec_name,
       creator.name AS created_by_name,
       editor.name AS last_edited_by_name,
@@ -80,6 +84,7 @@ export async function listDrafts() {
            ELSE (COUNT(*) OVER (PARTITION BY keyed.dup_key))::int END AS dup_total
     FROM keyed
     JOIN users creator ON creator.id = keyed.created_by_user_id
+    JOIN users owner ON owner.id = COALESCE(keyed.assigned_to_user_id, keyed.created_by_user_id)
     LEFT JOIN users editor ON editor.id = keyed.last_edited_by_user_id
     LEFT JOIN users submitter ON submitter.id = keyed.submitted_by_user_id
     ORDER BY (keyed.prioritized_at IS NULL) ASC, keyed.prioritized_at DESC, keyed.updated_at DESC
@@ -111,6 +116,20 @@ export async function updateDraftFormData(id, formData, editedByUserId) {
       UPDATE drafts SET form_data_json = $1, updated_at = iso_now() WHERE id = $2
     `, [JSON.stringify(formData), id]);
   }
+  return getDraftById(id);
+}
+
+// The one person who currently owns a draft: whoever a Senior/Admin assigned it to, or - if it was
+// never assigned - whoever created it. Interns may only edit drafts they own, and a revert-to-intern
+// is addressed to this person. Single definition shared by every route that needs it.
+export function getDraftOwnerId(draft) {
+  return draft.assigned_to_user_id ?? draft.created_by_user_id;
+}
+
+// Hands a draft to an Intern (or, with null, clears the assignment so it falls back to its creator).
+export async function setDraftAssignee(id, userId) {
+  const db = await getDb();
+  await db.query('UPDATE drafts SET assigned_to_user_id = $1 WHERE id = $2', [userId, id]);
   return getDraftById(id);
 }
 
