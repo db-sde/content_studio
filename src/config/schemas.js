@@ -328,8 +328,8 @@ export const schemas = {
         fields: [
           { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
           { key: 'syllabus_subjects', type: 'REPEATER', label: 'Syllabus Subjects', subfields: [
-            { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester 1' },
-            { key: 'subjects', label: 'Subjects', type: 'textarea', placeholder: 'e.g. Marketing Management, Financial Accounting, Business Statistics' }
+            { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester I', autoDefault: 'semester' },
+            { key: 'subjects', label: 'Subjects (one per line)', type: 'textarea', rows: 4, outputFormat: 'bullets', hint: 'Published as a bullet list - put each subject on its own line.', placeholder: 'Marketing Management\nFinancial Accounting\nBusiness Statistics' }
           ] },
           { key: 'syllabus_content', type: 'RICH_TEXT', label: 'Syllabus Content', placeholder: 'Describe the syllabus / subjects', required: true, aiAssist: { instructions: 'Summarize the syllabus/subjects covered in this course, grounded only in the facts provided.' } }
         ]
@@ -471,8 +471,8 @@ export const schemas = {
         fields: [
           { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
           { key: 'syllabus_subjects', type: 'REPEATER', label: 'Syllabus Subjects', subfields: [
-            { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester 1' },
-            { key: 'subjects', label: 'Subjects', type: 'textarea', placeholder: 'e.g. Marketing Management, Financial Accounting, Business Statistics' }
+            { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester I', autoDefault: 'semester' },
+            { key: 'subjects', label: 'Subjects (one per line)', type: 'textarea', rows: 4, outputFormat: 'bullets', hint: 'Published as a bullet list - put each subject on its own line.', placeholder: 'Marketing Management\nFinancial Accounting\nBusiness Statistics' }
           ] },
           { key: 'syllabus_content', type: 'RICH_TEXT', label: 'Syllabus Content', placeholder: 'Describe subjects covered per semester', required: true, aiAssist: { instructions: 'Summarize the subjects covered per semester in this specialization, grounded only in the facts provided.' } }
         ]
@@ -626,20 +626,134 @@ export const getInitialState = (pageType) => {
   return state;
 };
 
-// Returns true if a repeater row has at least one non-empty sub-field
-const isRowFilled = (row) => Object.values(row || {}).some(v => v !== undefined && String(v).trim() !== '');
+// --- Output formatting helpers -------------------------------------------------------------------
+// Shared by the editor UI (src/App.jsx, src/components/FieldTypes.jsx) and by transformToACF below
+// - which also runs server-side when publishing/exporting - so what the writer sees and what
+// actually gets published can't drift apart.
 
-// Cleans a repeater array down to non-empty rows, normalized to the sub-field keys
+// Section headings ("About Section Heading", "FAQs Section Heading", ...) are all keyed *_heading.
+export const isHeadingFieldKey = (key) => /(^|_)heading$/.test(key);
+
+// Capitalizes the first letter of every word ("about the program" -> "About The Program"). Only
+// lowercase letters at a word start are touched, so acronyms/proper nouns already typed in caps
+// (MBA, FAQs, NMIMS) are left exactly as written. Apostrophes deliberately don't start a "word"
+// ("student's" must not become "Student'S").
+export const toTitleCase = (str) => String(str).replace(/(^|[\s(\-/])([a-z])/g, (_, lead, ch) => lead + ch.toUpperCase());
+
+// Returns a copy of formData with every heading field title-cased. Non-heading keys, non-string
+// values and untouched headings are passed through as-is (same references where possible).
+export const normalizeHeadingFields = (formData) => {
+  if (!formData) return formData;
+  let changed = false;
+  const out = { ...formData };
+  Object.keys(out).forEach(key => {
+    if (isHeadingFieldKey(key) && typeof out[key] === 'string') {
+      const next = toTitleCase(out[key]);
+      if (next !== out[key]) { out[key] = next; changed = true; }
+    }
+  });
+  return changed ? out : formData;
+};
+
+const ROMAN_NUMERALS = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV', 'XVI', 'XVII', 'XVIII', 'XIX', 'XX'];
+
+// "Semester I", "Semester II", ... by zero-based position. Past XX (never in practice) falls back
+// to plain digits rather than inventing a longer numeral.
+export const defaultSemesterLabel = (index) => `Semester ${ROMAN_NUMERALS[index] || index + 1}`;
+
+// Matches only labels this app itself would generate ("Semester IV") - used to renumber after a
+// row is removed without ever touching a label the writer typed by hand ("Semester 1", "Term A").
+export const isGeneratedSemesterLabel = (value) => /^Semester [IVXLC]+$/.test(String(value || '').trim());
+
+// Splits a pasted/typed list of subjects into individual items. Multiple lines -> one item per
+// line (commas inside a line are kept: "Research Methods, Applied" stays one subject). A single
+// line -> split on commas/semicolons/bullet characters, which is how these were entered before
+// ("Marketing Management, Financial Accounting, Business Statistics"). Leading bullet/number
+// markers pasted from a doc ("● ", "- ", "1. ") are stripped.
+export const splitSubjectItems = (text) => {
+  const raw = String(text || '').replace(/\r/g, '').trim();
+  if (!raw) return [];
+  const lines = raw.split('\n').map(l => l.trim()).filter(Boolean);
+  const pieces = lines.length > 1 ? lines : lines[0].split(/[,;•●◦▪‣]/);
+  return pieces
+    .map(p => p.replace(/^\s*(?:[•●◦▪‣*-]|\d+[.)])\s*/, '').trim())
+    .filter(Boolean);
+};
+
+const escapeHtml = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+// "A\nB\nC" -> "<ul><li>A</li><li>B</li><li>C</li></ul>". Already-HTML input (contains <li>) is
+// returned untouched so re-exporting an already-converted value can't double-wrap it.
+export const toBulletListHtml = (text) => {
+  if (/<li[\s>]/i.test(String(text || ''))) return String(text);
+  const items = splitSubjectItems(text);
+  if (!items.length) return '';
+  return `<ul>${items.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>`;
+};
+
+// Inverse of toBulletListHtml, used when hand-edited JSON (which holds the exported HTML) is merged
+// back into the editor, whose Subjects box is plain text - one subject per line.
+export const bulletListHtmlToText = (html) => {
+  const str = String(html || '');
+  if (!/<li[\s>]/i.test(str)) return str;
+  const items = [...str.matchAll(/<li[^>]*>([\s\S]*?)<\/li>/gi)].map(m => m[1].replace(/<[^>]+>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim());
+  return items.filter(Boolean).join('\n');
+};
+
+// Returns true if a repeater row has real content. A sub-field marked `autoDefault` (the
+// pre-filled "Semester I" label) doesn't count on its own - otherwise adding a row would instantly
+// make it "filled", and an untouched row would be exported/validated as if the writer had used it.
+const isRowFilled = (row, subfields) => Object.entries(row || {}).some(([k, v]) => {
+  if (subfields && subfields.some(sf => sf.key === k && sf.autoDefault)) return false;
+  return v !== undefined && String(v).trim() !== '';
+});
+
+// Cleans a repeater array down to non-empty rows, normalized to the sub-field keys. Fills in
+// default semester labels for rows whose label was left blank, and renders bullet-format
+// sub-fields (Syllabus "Subjects") as an HTML list.
 const cleanRepeater = (rows = [], subfields) => {
   return rows
-    .filter(isRowFilled)
-    .map(row => {
+    .filter(row => isRowFilled(row, subfields))
+    .map((row, index) => {
       const cleaned = {};
       subfields.forEach(sf => {
-        cleaned[sf.key] = row[sf.key] || '';
+        let value = row[sf.key] || '';
+        if (sf.autoDefault === 'semester' && !String(value).trim()) value = defaultSemesterLabel(index);
+        if (sf.outputFormat === 'bullets') value = toBulletListHtml(value);
+        cleaned[sf.key] = value;
       });
       return cleaned;
     });
+};
+
+// Applied once when an existing draft is opened: title-cases headings (see normalizeHeadingFields)
+// and gives any syllabus row that has subjects but no semester label its default "Semester I/II/...".
+// New rows already get their label at creation time (RepeaterBuilder); this only catches drafts
+// written before that existed. Rows are numbered by position among the rows that actually have
+// content, matching what cleanRepeater exports.
+export const normalizeLoadedFormData = (formData, pageType) => {
+  if (!formData) return formData;
+  let out = normalizeHeadingFields(formData);
+  const schema = schemas[pageType];
+  if (!schema) return out;
+
+  schema.sections.forEach(sec => sec.fields.forEach(field => {
+    if (field.type !== 'REPEATER' || !Array.isArray(out[field.key])) return;
+    const labelField = field.subfields.find(sf => sf.autoDefault === 'semester');
+    if (!labelField) return;
+
+    let filledSoFar = 0;
+    let changed = false;
+    const rows = out[field.key].map(row => {
+      if (!isRowFilled(row, field.subfields)) return row;
+      const index = filledSoFar++;
+      if (String(row[labelField.key] || '').trim()) return row;
+      changed = true;
+      return { ...row, [labelField.key]: defaultSemesterLabel(index) };
+    });
+    if (changed) out = { ...out, [field.key]: rows };
+  }));
+  return out;
 };
 
 // Strips tags rather than exact-matching a specific empty serialization like '<p></p>' — TipTap
@@ -663,6 +777,8 @@ export const transformToACF = (state, pageType) => {
     section.fields.forEach(field => {
       if (field.type === 'REPEATER') {
         output[field.key] = cleanRepeater(state[field.key], field.subfields);
+      } else if (isHeadingFieldKey(field.key)) {
+        output[field.key] = toTitleCase(state[field.key] || '');
       } else {
         output[field.key] = state[field.key] || '';
       }
@@ -675,7 +791,7 @@ export const transformToACF = (state, pageType) => {
 // Checks whether a single field satisfies its "required" rule
 const fieldPasses = (state, field) => {
   if (field.type === 'REPEATER') {
-    const rows = (state[field.key] || []).filter(isRowFilled);
+    const rows = (state[field.key] || []).filter(row => isRowFilled(row, field.subfields));
     return rows.length >= (field.minItems || 1);
   }
   if (field.type === 'RICH_TEXT') {
@@ -697,7 +813,7 @@ export const validateState = (state, pageType) => {
       if (!fieldPasses(state, field)) {
         invalidFields[field.key] = true;
         if (field.type === 'REPEATER') {
-          const count = (state[field.key] || []).filter(isRowFilled).length;
+          const count = (state[field.key] || []).filter(row => isRowFilled(row, field.subfields)).length;
           errors.push(`"${field.label}" requires at least ${field.minItems || 1} item(s), found ${count} (${sec.title}).`);
         } else {
           errors.push(`"${field.label}" is required (${sec.title}).`);
@@ -729,7 +845,7 @@ export const validateFactsOnly = (state, pageType) => {
       if (!fieldPasses(state, field)) {
         invalidFields[field.key] = true;
         if (field.type === 'REPEATER') {
-          const count = (state[field.key] || []).filter(isRowFilled).length;
+          const count = (state[field.key] || []).filter(row => isRowFilled(row, field.subfields)).length;
           errors.push(`"${field.label}" requires at least ${field.minItems || 1} item(s), found ${count} (${sec.title}).`);
         } else {
           errors.push(`"${field.label}" is required (${sec.title}).`);
@@ -779,7 +895,7 @@ export const getSectionStatus = (state, section, isFieldRelevant = () => true) =
     const val = state[field.key];
     let isFilled;
     if (field.type === 'REPEATER') {
-      isFilled = (val || []).some(isRowFilled);
+      isFilled = (val || []).some(row => isRowFilled(row, field.subfields));
     } else if (field.type === 'RICH_TEXT') {
       isFilled = !isRichTextEmpty(val);
     } else {

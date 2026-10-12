@@ -15,8 +15,11 @@ function findField(pageType, fieldKey) {
   return null;
 }
 
-export function canEditFieldServer(pageType, fieldKey, { role, draftStatus, allowInternAiEdit }) {
+export function canEditFieldServer(pageType, fieldKey, { role, draftStatus, allowInternAiEdit, isDraftOwner = true }) {
   if (role === 'senior' || role === 'admin') return true;
+
+  // An Intern may only edit drafts they own (see isDraftOwnerOrNotIntern in routes/drafts.js).
+  if (!isDraftOwner) return false;
 
   const internHasTurn = draftStatus === 'intern_editing';
   if (!internHasTurn) return false;

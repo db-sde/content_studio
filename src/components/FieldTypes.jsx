@@ -8,6 +8,7 @@ import {
   Trash2, Plus, X, Search, PenLine
 } from 'lucide-react';
 import { parseRepeaterPasteText, extractSingleFieldValue } from '../utils/pasteParsing';
+import { defaultSemesterLabel, isGeneratedSemesterLabel } from '../config/schemas';
 
 // Shared by TextInput/TextArea's onPaste below — a plain single-value paste (the common "copied
 // just this one cell/value" case) is let through untouched; anything that looks like a bigger,
@@ -369,12 +370,18 @@ export const RichText = ({ label, placeholder, required, value, onChange, error,
 // per configured sub-field (text or textarea), matching the WP ACF repeater/sub-field model 1:1.
 export const RepeaterBuilder = ({ label, required, value = [], onChange, error, subfields = [], disabled }) => {
 
-  const handleAddRow = () => {
-    const newRow = {};
+  // Sub-fields flagged `autoDefault: 'semester'` start pre-filled with "Semester I", "Semester II", ...
+  // by row position, so the writer only has to type the subjects. Still fully editable.
+  const blankRow = (rowIndex) => {
+    const row = {};
     subfields.forEach(sf => {
-      newRow[sf.key] = '';
+      row[sf.key] = sf.autoDefault === 'semester' ? defaultSemesterLabel(rowIndex) : '';
     });
-    onChange([...value, newRow]);
+    return row;
+  };
+
+  const handleAddRow = () => {
+    onChange([...value, blankRow(value.length)]);
   };
 
   const handleUpdateCell = (rowIndex, key, val) => {
@@ -386,13 +393,25 @@ export const RepeaterBuilder = ({ label, required, value = [], onChange, error, 
   // Pasting a single value behaves like a normal paste. Pasting a multi-line or tab-separated
   // block (copied from a spreadsheet/doc table) explodes into this row plus as many new rows
   // as needed — mirroring how the standalone "Paste Data" bulk-import works for flat fields.
-  const handleSubfieldPaste = (rowIndex, e) => {
+  const handleSubfieldPaste = (rowIndex, sub, e) => {
     const text = (e.clipboardData || window.clipboardData).getData('text');
     if (!text.includes('\t') && !/\r?\n/.test(text.trim())) return; // plain single value, let default paste happen
+    // A bullet-list sub-field (Syllabus "Subjects") is meant to hold one item per line, so a
+    // newline-only paste into it is just its own content - only a tab-separated paste (a
+    // spreadsheet row/table) is treated as "explode into several rows".
+    if (sub.outputFormat === 'bullets' && !text.includes('\t')) return;
 
     e.preventDefault();
     const parsedRows = parseRepeaterPasteText(text, subfields);
     if (parsedRows.length === 0) return;
+
+    // Pasted rows carry no semester label of their own unless the source did - number them by
+    // where they land rather than leaving them blank.
+    parsedRows.forEach((row, i) => {
+      subfields.forEach(sf => {
+        if (sf.autoDefault === 'semester' && !String(row[sf.key] || '').trim()) row[sf.key] = defaultSemesterLabel(rowIndex + i);
+      });
+    });
 
     const updated = [...value];
     updated[rowIndex] = { ...updated[rowIndex], ...parsedRows[0] };
@@ -400,8 +419,19 @@ export const RepeaterBuilder = ({ label, required, value = [], onChange, error, 
     onChange(updated);
   };
 
+  // After a removal, rows still carrying a generated "Semester <roman>" label are renumbered to
+  // match their new position (removing Semester II shouldn't leave "I, III, IV"). A label the
+  // writer typed themselves ("Semester 1", "Term A") never matches isGeneratedSemesterLabel, so
+  // it's left alone.
   const handleRemoveRow = (rowIndex) => {
-    onChange(value.filter((_, i) => i !== rowIndex));
+    const remaining = value.filter((_, i) => i !== rowIndex).map((row, i) => {
+      const renumbered = { ...row };
+      subfields.forEach(sf => {
+        if (sf.autoDefault === 'semester' && isGeneratedSemesterLabel(row[sf.key])) renumbered[sf.key] = defaultSemesterLabel(i);
+      });
+      return renumbered;
+    });
+    onChange(remaining);
   };
 
   return (
@@ -429,13 +459,14 @@ export const RepeaterBuilder = ({ label, required, value = [], onChange, error, 
               {subfields.map(sf => (
                 <div key={sf.key}>
                   <label className="text-[10px] font-bold text-navy uppercase tracking-wider block mb-0.5">{sf.label}</label>
+                  {sf.hint && <p className="text-[10px] text-muted mb-1">{sf.hint}</p>}
                   {sf.type === 'textarea' ? (
                     <textarea
-                      rows={2}
+                      rows={sf.rows || 2}
                       placeholder={sf.placeholder}
                       value={row[sf.key] || ''}
                       onChange={(e) => handleUpdateCell(rowIndex, sf.key, e.target.value)}
-                      onPaste={(e) => handleSubfieldPaste(rowIndex, e)}
+                      onPaste={(e) => handleSubfieldPaste(rowIndex, sf, e)}
                       disabled={disabled}
                       className="w-full px-3 py-1.5 border border-border rounded bg-white text-navy focus:outline-none focus:border-navy text-xs resize-y disabled:bg-off disabled:text-muted disabled:cursor-not-allowed"
                     />
@@ -445,7 +476,7 @@ export const RepeaterBuilder = ({ label, required, value = [], onChange, error, 
                       placeholder={sf.placeholder}
                       value={row[sf.key] || ''}
                       onChange={(e) => handleUpdateCell(rowIndex, sf.key, e.target.value)}
-                      onPaste={(e) => handleSubfieldPaste(rowIndex, e)}
+                      onPaste={(e) => handleSubfieldPaste(rowIndex, sf, e)}
                       disabled={disabled}
                       className="w-full px-3 py-1.5 border border-border rounded bg-white text-navy focus:outline-none focus:border-navy text-xs disabled:bg-off disabled:text-muted disabled:cursor-not-allowed"
                     />

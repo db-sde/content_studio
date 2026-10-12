@@ -9,7 +9,12 @@ import {
   validateFactsOnly,
   calculateProgress,
   getSectionStatus,
-  getIcon
+  getIcon,
+  isHeadingFieldKey,
+  toTitleCase,
+  normalizeHeadingFields,
+  normalizeLoadedFormData,
+  bulletListHtmlToText
 } from './config/schemas';
 import {
   TextInput,
@@ -27,6 +32,7 @@ import { StyleReviewPanel } from './screens/StyleReviewPanel';
 import { ActivityPanel } from './screens/ActivityPanel';
 import { syncFieldRecord, getPricingEstimate, getGlobalCostSummary } from './services/aiClient';
 import { listDirectoryEntries } from './services/directoryClient';
+import { NOTIFICATION_TYPE_VERBS } from './utils/notificationFormat';
 import * as draftsClient from './services/draftsClient';
 import * as notificationsClient from './services/notificationsClient';
 import { canEditField, getLockReason } from './utils/permissions';
@@ -41,7 +47,7 @@ import {
   ArrowLeft, Save, Download, Eye, Copy, Trash2,
   History, Sparkles, CheckCircle, AlertCircle, X, ChevronRight,
   Check, CornerDownRight, ClipboardPaste, GraduationCap, BookOpen, Award, Pencil, Bell,
-  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images
+  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock
 } from 'lucide-react';
 import './App.css';
 
@@ -84,6 +90,13 @@ const DRAFT_STATUS_TABLE_STYLES = {
 // one the draft is already in) as direct jump targets via the 'admin-set-status' override, not
 // just whatever the normal Intern -> Senior -> Admin chain would allow next.
 const ALL_DRAFT_STATUSES = ['intern_editing', 'senior_review', 'admin_review', 'approved'];
+
+// Saved Drafts filter chips: the four statuses plus two cross-cutting buckets. "Sent Back" is any
+// draft that was bounced backwards (prioritized_at set - cleared again when its recipient sends it
+// forward), so a Senior's reverted page shows up in its own bucket instead of lingering in theirs.
+// "Duplicates" is any draft sharing its page type + university + title with another one.
+const DRAFT_FILTER_KEYS = ['all', ...ALL_DRAFT_STATUSES, 'sent_back', 'duplicates'];
+const DRAFT_FILTER_LABELS = { all: 'All', ...DRAFT_STATUS_LABELS, sent_back: 'Sent Back', duplicates: 'Duplicates' };
 
 // Groups a section's fields into alternating "grid" runs (consecutive short TEXT_INPUT fields,
 // packed 2-3 per row) and "single" full-width fields (textarea/rich text/repeater) — pure
@@ -150,14 +163,18 @@ function formReducer(state, action) {
         ...state,
         formData: {
           ...state.formData,
-          [action.payload.key]: action.payload.value
+          // Section headings are always stored title-cased ("About The Program") - see
+          // toTitleCase in schemas.js. Length-preserving, so the caret never jumps while typing.
+          [action.payload.key]: isHeadingFieldKey(action.payload.key) && typeof action.payload.value === 'string'
+            ? toTitleCase(action.payload.value)
+            : action.payload.value
         }
       };
     case ACTIONS.LOAD_DRAFT:
       return {
         activePageType: action.payload.pageType,
         activeDraftId: action.payload.draftId,
-        formData: action.payload.state,
+        formData: normalizeLoadedFormData(action.payload.state, action.payload.pageType),
         status: action.payload.status,
         allowInternAiEdit: action.payload.allowInternAiEdit,
         prioritizedAt: action.payload.prioritizedAt ?? null,
@@ -188,7 +205,7 @@ function formReducer(state, action) {
     case ACTIONS.BULK_UPDATE_FIELDS:
       return {
         ...state,
-        formData: { ...state.formData, ...action.payload.fields }
+        formData: normalizeHeadingFields({ ...state.formData, ...action.payload.fields })
       };
     case ACTIONS.SET_WORDPRESS_URL:
       return {
@@ -242,6 +259,14 @@ function ContentStudioApp() {
   // avatar + chevron now), so this no longer needs to be measured live like the old wide pill did.
   const userBadgeClearance = 120;
   const [drafts, setDrafts] = useState([]);
+  // A draft belongs to the Intern who created it. An Intern can open another Intern's draft to
+  // read it but not change it (the server enforces this too - see isDraftOwnerOrNotIntern in
+  // server/routes/drafts.js). Seniors/Admins are never restricted. Resolved from the polled drafts
+  // list (which carries created_by_user_id) rather than adding owner info to the reducer; if the
+  // list hasn't caught up with a just-created draft yet, treat it as the creator's own.
+  const activeDraftMeta = activeDraftId ? drafts.find(d => d.id === activeDraftId) : null;
+  const isDraftOwner = currentUser.role !== 'intern' || !activeDraftMeta || activeDraftMeta.created_by_user_id === currentUser.id;
+  const [draftsSearch, setDraftsSearch] = useState('');
   const [expandedSections, setExpandedSections] = useState({});
   const [showValidationErrors, setShowValidationErrors] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -311,15 +336,47 @@ function ContentStudioApp() {
     activePageTypeRef.current = activePageType;
   });
 
+  // The toast object is rebuilt on every render of its provider, so it's read through a ref - putting
+  // it in refreshNotifications's dependencies would recreate that callback (and restart the polling
+  // effect below) on every render.
+  const toastRef = useRef(toast);
+  useEffect(() => {
+    toastRef.current = toast;
+  });
+  // null until the first notifications fetch completes - that first load must not pop up every old
+  // notification as if it were new.
+  const seenNotificationIdsRef = useRef(null);
+
   const refreshNotifications = useCallback(async () => {
     try {
       const { notifications: list, lastReadAt } = await notificationsClient.listNotifications();
       setNotifications(list);
       setNotificationsLastReadAt(lastReadAt);
+
+      // The bell's red dot is easy to miss - when something new actually arrives (a specialization
+      // sent back to you, a draft waiting for review) also raise a visible pop-up for it.
+      if (seenNotificationIdsRef.current === null) {
+        seenNotificationIdsRef.current = new Set(list.map(n => n.id));
+        const unread = list.filter(n => !lastReadAt || n.created_at > lastReadAt).length;
+        if (unread > 0) {
+          toastRef.current.info(`You have ${unread} unread notification${unread === 1 ? '' : 's'} - click the bell to see ${unread === 1 ? 'it' : 'them'}.`, 12000);
+        }
+      } else {
+        const seen = seenNotificationIdsRef.current;
+        const fresh = list.filter(n => !seen.has(n.id));
+        fresh.forEach(n => seen.add(n.id));
+        // Skip anything this user triggered themselves (e.g. an Admin's own override).
+        const incoming = fresh.filter(n => n.created_by_user_id !== currentUser?.id);
+        incoming.slice(0, 3).forEach(n => {
+          const verb = NOTIFICATION_TYPE_VERBS[n.type] || 'updated';
+          toastRef.current.info(`${n.created_by_name} ${verb}: ${n.draft_label || 'a draft'}`, 15000);
+        });
+        if (incoming.length > 3) toastRef.current.info(`...and ${incoming.length - 3} more new notifications - click the bell.`, 15000);
+      }
     } catch (e) {
       console.error('Error loading notifications', e);
     }
-  }, []);
+  }, [currentUser?.id]);
 
   const refreshGlobalCostSummary = useCallback(async () => {
     try {
@@ -437,6 +494,43 @@ function ContentStudioApp() {
     if (draft.page_type === PAGE_TYPES.COURSE) return draft.program_name || 'Untitled Course';
     if (draft.page_type === PAGE_TYPES.UNIVERSITY) return draft.university_full_name || draft.university_name || 'Untitled University';
     return 'Untitled Page';
+  };
+
+  const isUntitledDraft = (draft) => {
+    if (draft.page_type === PAGE_TYPES.SPECIALIZATION) return !(draft.spec_name || '').trim();
+    if (draft.page_type === PAGE_TYPES.COURSE) return !(draft.program_name || '').trim();
+    return !(draft.university_full_name || draft.university_name || '').trim();
+  };
+
+  // dup_rank/dup_total come from the server's duplicate detection (see listDrafts in
+  // server/repositories/draftsRepo.js): rank 1 is the earliest draft with a given page type +
+  // university + title, higher ranks are repeats of it.
+  const isDuplicateDraft = (draft) => (draft.dup_rank || 0) > 1;
+  const isRepeatedDraft = (draft) => (draft.dup_total || 0) > 1;
+
+  // "Needs my attention" pins a draft to the top of MY list - only for the person who actually has
+  // to act on a bounced-back draft. prioritized_at used to pin it for everyone, which is why a
+  // Senior's own revert-to-intern kept floating at the top of the Senior's list as if still theirs.
+  const needsMyAttention = (draft) => !!draft.prioritized_at && (
+    (currentUser.role === 'intern' && draft.status === 'intern_editing' && draft.created_by_user_id === currentUser.id) ||
+    (currentUser.role === 'senior' && draft.status === 'senior_review')
+  );
+
+  const draftMatchesFilter = (draft, filter) => {
+    if (filter === 'all') return true;
+    if (filter === 'sent_back') return !!draft.prioritized_at;
+    if (filter === 'duplicates') return isRepeatedDraft(draft);
+    return draft.status === filter;
+  };
+
+  const draftMatchesSearch = (draft, query) => {
+    if (!query) return true;
+    const haystack = [
+      draft.university_name, draft.university_full_name, getDraftListTitle(draft),
+      draft.created_by_name, draft.submitted_by_name, draft.last_edited_by_name,
+      DRAFT_STATUS_LABELS[draft.status], SCHEMA_DETAILS[draft.page_type]?.title
+    ].filter(Boolean).join(' ').toLowerCase();
+    return query.split(/\s+/).every(term => haystack.includes(term));
   };
 
   // Get display name for top bar
@@ -1095,7 +1189,7 @@ function ContentStudioApp() {
     const { blocks: repeaterBlocks, remainingText } = extractRepeaterBlocks(text, repeaterFields);
 
     repeaterBlocks.forEach(({ repeaterField, rows }) => {
-      if (!canEditField(repeaterField, { role: currentUser.role, draftStatus, allowInternAiEdit })) {
+      if (!canEditField(repeaterField, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner })) {
         lockedLabels.push(repeaterField.label);
         return;
       }
@@ -1114,7 +1208,7 @@ function ContentStudioApp() {
 
       // Mirrors the JSON edit-mode's canEditField filtering (Phase 6) — pasting text was the one
       // remaining path that could set a locked field's value straight through the disabled input.
-      if (!canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit })) {
+      if (!canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner })) {
         lockedLabels.push(field.label);
         return;
       }
@@ -1175,9 +1269,20 @@ function ContentStudioApp() {
     Object.keys(parsed).forEach(key => {
       const field = fieldsByKey[key];
       if (!field) return;
-      const canEdit = canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit });
+      const canEdit = canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner });
       if (canEdit) {
-        allowed[key] = parsed[key];
+        // The exported JSON holds bullet-format sub-fields (Syllabus "Subjects") as an HTML list,
+        // but the editor's Subjects box is plain one-per-line text - convert back so applying
+        // unmodified JSON doesn't leave raw <ul><li> tags in the box.
+        allowed[key] = field.type === 'REPEATER' && Array.isArray(parsed[key])
+          ? parsed[key].map(row => {
+              const converted = { ...row };
+              field.subfields.forEach(sf => {
+                if (sf.outputFormat === 'bullets' && typeof converted[sf.key] === 'string') converted[sf.key] = bulletListHtmlToText(converted[sf.key]);
+              });
+              return converted;
+            })
+          : parsed[key];
       } else {
         skipped.push(field.label);
       }
@@ -1277,7 +1382,7 @@ function ContentStudioApp() {
   // Excludes fields the current viewer can't act on right now (e.g. an Intern's locked AI fields)
   // from both the top progress bar and the sidebar dots below — otherwise "100%"/"complete" never
   // arrives for an Intern who has genuinely finished everything that's theirs to fill in.
-  const isFieldRelevantToViewer = (field) => canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit });
+  const isFieldRelevantToViewer = (field) => canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner });
   const progressPercent = activePageType ? calculateProgress(formData, activePageType, isFieldRelevantToViewer) : 0;
   const acfPayload = activePageType ? transformToACF(formData, activePageType) : null;
   const currentValidation = activePageType ? validateState(formData, activePageType) : { isValid: true, errors: [], invalidFields: {} };
@@ -1617,9 +1722,23 @@ function ContentStudioApp() {
             <div className="max-w-6xl w-full mx-auto px-6 py-10">
               <div className="bg-white border border-border rounded-2xl p-6 shadow-premium">
                 {(() => {
-                  const filteredDrafts = draftsStatusFilter === 'all'
-                    ? drafts
-                    : drafts.filter(d => d.status === draftsStatusFilter);
+                  const searchQuery = draftsSearch.trim().toLowerCase();
+                  const filteredDrafts = drafts
+                    .filter(d => draftMatchesFilter(d, draftsStatusFilter) && draftMatchesSearch(d, searchQuery))
+                    .sort((a, b) => (needsMyAttention(b) - needsMyAttention(a)) || (new Date(b.updated_at) - new Date(a.updated_at)));
+
+                  // Counted over every draft (not the filtered view) so the numbers stay put while
+                  // searching: an untitled draft isn't an entry yet, and a repeat isn't a new one.
+                  const untitledCount = drafts.filter(isUntitledDraft).length;
+                  const duplicateCount = drafts.filter(d => !isUntitledDraft(d) && isDuplicateDraft(d)).length;
+                  const uniqueCount = drafts.length - untitledCount - duplicateCount;
+                  const statusSummary = searchQuery
+                    ? ALL_DRAFT_STATUSES
+                        .map(st => [st, filteredDrafts.filter(d => d.status === st).length])
+                        .filter(([, c]) => c > 0)
+                        .map(([st, c]) => `${c} in ${DRAFT_STATUS_LABELS[st]}`)
+                        .join(' · ')
+                    : '';
                   return (
                 <>
                 <div className="flex justify-between items-center mb-4 border-b border-border pb-4">
@@ -1669,23 +1788,60 @@ function ContentStudioApp() {
                 {/* Status filter — available to all three roles, so an Intern/Senior/Admin can
                     each narrow the list down to just the stage they care about. */}
                 {drafts.length > 0 && (
-                  <div className="flex flex-wrap items-center gap-1.5 mb-5">
-                    {['all', ...ALL_DRAFT_STATUSES].map(s => {
-                      const count = s === 'all' ? drafts.length : drafts.filter(d => d.status === s).length;
-                      const active = draftsStatusFilter === s;
-                      return (
+                  <>
+                    {/* Search by university, specialization/course title, intern, or status - answers
+                        "has this one already been done, and where is it now?" without scrolling. */}
+                    <div className="relative mb-3">
+                      <Search className="w-4 h-4 text-muted absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={draftsSearch}
+                        onChange={(e) => setDraftsSearch(e.target.value)}
+                        placeholder="Search by university, specialization, intern or status..."
+                        className="w-full pl-10 pr-9 py-2.5 rounded-lg border border-border bg-white text-navy placeholder:text-muted/60 text-sm focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy"
+                      />
+                      {draftsSearch && (
                         <button
-                          key={s}
-                          onClick={() => setDraftsStatusFilter(s)}
-                          className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all ${
-                            active ? 'bg-navy text-white' : 'bg-off text-muted hover:text-navy hover:bg-navy-soft'
-                          }`}
+                          type="button"
+                          onClick={() => setDraftsSearch('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-navy"
+                          title="Clear search"
                         >
-                          {s === 'all' ? 'All' : DRAFT_STATUS_LABELS[s]} ({count})
+                          <X className="w-3.5 h-3.5" />
                         </button>
-                      );
-                    })}
-                  </div>
+                      )}
+                    </div>
+                    {searchQuery && filteredDrafts.length > 0 && (
+                      <p className="text-xs text-navy font-semibold mb-3">
+                        {filteredDrafts.length} match{filteredDrafts.length === 1 ? '' : 'es'}: {statusSummary}
+                      </p>
+                    )}
+
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 text-xs">
+                      <span className="text-muted"><span className="font-bold text-navy">{uniqueCount}</span> unique</span>
+                      <span className={duplicateCount > 0 ? 'text-danger' : 'text-muted'}><span className="font-bold">{duplicateCount}</span> duplicate{duplicateCount === 1 ? '' : 's'}</span>
+                      <span className="text-muted"><span className="font-bold text-navy">{untitledCount}</span> untitled</span>
+                      <span className="text-muted/70">{drafts.length} drafts total</span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1.5 mb-5">
+                      {DRAFT_FILTER_KEYS.map(s => {
+                        const count = drafts.filter(d => draftMatchesFilter(d, s)).length;
+                        const active = draftsStatusFilter === s;
+                        return (
+                          <button
+                            key={s}
+                            onClick={() => setDraftsStatusFilter(s)}
+                            className={`text-xs font-bold px-3 py-1.5 rounded-full transition-all ${
+                              active ? 'bg-navy text-white' : 'bg-off text-muted hover:text-navy hover:bg-navy-soft'
+                            }`}
+                          >
+                            {DRAFT_FILTER_LABELS[s]} ({count})
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
 
                 {filteredDrafts.length === 0 ? (
@@ -1703,9 +1859,22 @@ function ContentStudioApp() {
                           Pick a template to start writing →
                         </button>
                       </>
+                    ) : searchQuery ? (
+                      <>
+                        <p className="text-sm text-navy font-semibold">No draft found for "{draftsSearch.trim()}"</p>
+                        <p className="text-xs text-muted mt-1 max-w-sm mx-auto">
+                          Nothing with that name exists yet{draftsStatusFilter !== 'all' ? ' under this filter' : ''} - it hasn't been started, so it still needs editing.
+                        </p>
+                        <button
+                          onClick={() => { setDraftsSearch(''); setDraftsStatusFilter('all'); }}
+                          className="text-xs text-orange font-bold uppercase tracking-wide mt-3 hover:text-orange-hover"
+                        >
+                          Clear search →
+                        </button>
+                      </>
                     ) : (
                       <>
-                        <p className="text-sm text-navy font-semibold">No drafts with this status</p>
+                        <p className="text-sm text-navy font-semibold">No drafts in this view</p>
                         <button
                           onClick={() => setDraftsStatusFilter('all')}
                           className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
@@ -1734,6 +1903,8 @@ function ContentStudioApp() {
                           <th className="py-3 px-4">University Name</th>
                           <th className="py-3 px-4">Page Type</th>
                           <th className="py-3 px-4">Page/Spec Title</th>
+                          <th className="py-3 px-4">Intern</th>
+                          <th className="py-3 px-4">Duplicate Check</th>
                           <th className="py-3 px-4">Status</th>
                           <th className="py-3 px-4">Last Edited</th>
                           <th className="py-3 px-4 text-right">Actions</th>
@@ -1744,7 +1915,7 @@ function ContentStudioApp() {
                           <tr
                             key={draft.id}
                             onClick={() => loadDraft(draft)}
-                            className={`hover:bg-off cursor-pointer transition-colors group ${draft.prioritized_at ? 'bg-orange-soft/40' : ''}`}
+                            className={`hover:bg-off cursor-pointer transition-colors group ${needsMyAttention(draft) ? 'bg-orange-soft/40' : ''}`}
                           >
                             {currentUser.role === 'admin' && (
                               <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
@@ -1758,7 +1929,7 @@ function ContentStudioApp() {
                             )}
                             <td className="py-4 px-4 font-bold text-navy">
                               <span className="flex items-center gap-1.5">
-                                {draft.prioritized_at && <Flame className="w-3.5 h-3.5 text-orange shrink-0" title="Bounced back — needs attention" />}
+                                {needsMyAttention(draft) && <Flame className="w-3.5 h-3.5 text-orange shrink-0" title="Bounced back — needs attention" />}
                                 {draft.university_name}
                               </span>
                             </td>
@@ -1768,6 +1939,23 @@ function ContentStudioApp() {
                               </span>
                             </td>
                             <td className="py-4 px-4 font-medium text-muted">{getDraftListTitle(draft)}</td>
+                            <td className="py-4 px-4">
+                              <span className="block text-xs font-bold text-navy">{draft.created_by_name}</span>
+                              {draft.submitted_by_name && (
+                                <span className="block text-[10px] text-muted mt-0.5">Submitted by {draft.submitted_by_name}</span>
+                              )}
+                            </td>
+                            <td className="py-4 px-4">
+                              {isUntitledDraft(draft) ? (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-off text-muted" title="No title entered yet - not counted as an entry">Untitled</span>
+                              ) : isDuplicateDraft(draft) ? (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-danger-soft text-danger" title="Another, earlier draft already covers this university + title">Duplicate</span>
+                              ) : isRepeatedDraft(draft) ? (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-orange-soft text-orange" title="Earliest draft - later drafts repeat this one">Original · repeated ×{draft.dup_total - 1}</span>
+                              ) : (
+                                <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-green-soft text-green-success">Unique</span>
+                              )}
+                            </td>
                             <td className="py-4 px-4">
                               {currentUser.role === 'admin' ? (
                                 (() => {
@@ -1805,6 +1993,12 @@ function ContentStudioApp() {
                                   {DRAFT_STATUS_LABELS[draft.status] || DRAFT_STATUS_LABELS.intern_editing}
                                 </span>
                               )}
+                              {draft.prioritized_at && (
+                                <span className="ml-1.5 inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-orange-soft text-orange" title="Bounced back to this stage for fixes">
+                                  <CornerDownRight className="w-2.5 h-2.5" />
+                                  Sent back
+                                </span>
+                              )}
                               {draft.wordpress_url && (
                                 <a
                                   href={draft.wordpress_url}
@@ -1821,22 +2015,38 @@ function ContentStudioApp() {
                             <td className="py-4 px-4 text-xs text-muted">
                               {parseServerTimestamp(draft.updated_at).toLocaleDateString()} at{' '}
                               {parseServerTimestamp(draft.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {draft.last_edited_by_name && (
+                                <span className="block text-[10px] text-muted/80 mt-0.5">by {draft.last_edited_by_name}</span>
+                              )}
                             </td>
                             <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                               <div className="flex justify-end gap-2">
-                                <button
-                                  onClick={() => loadDraft(draft)}
-                                  className="text-xs bg-navy text-white hover:bg-navy-hover font-semibold px-3 py-1.5 rounded transition-all"
-                                >
-                                  Continue
-                                </button>
-                                <button
-                                  onClick={(e) => deleteDraft(draft.id, e)}
-                                  className="text-danger hover:text-danger-hover hover:bg-danger-soft p-1.5 rounded transition-colors"
-                                  title="Delete Draft"
-                                >
-                                  <Trash2 className="w-4 h-4" />
-                                </button>
+                                {currentUser.role === 'intern' && draft.created_by_user_id !== currentUser.id ? (
+                                  <button
+                                    onClick={() => loadDraft(draft)}
+                                    className="flex items-center gap-1 text-xs bg-off text-muted hover:text-navy font-semibold px-3 py-1.5 rounded transition-all"
+                                    title={`Assigned to ${draft.created_by_name} - view only`}
+                                  >
+                                    <Lock className="w-3 h-3" />
+                                    View
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => loadDraft(draft)}
+                                      className="text-xs bg-navy text-white hover:bg-navy-hover font-semibold px-3 py-1.5 rounded transition-all"
+                                    >
+                                      Continue
+                                    </button>
+                                    <button
+                                      onClick={(e) => deleteDraft(draft.id, e)}
+                                      className="text-danger hover:text-danger-hover hover:bg-danger-soft p-1.5 rounded transition-colors"
+                                      title="Delete Draft"
+                                    >
+                                      <Trash2 className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -1897,6 +2107,17 @@ function ContentStudioApp() {
                       <span className="text-gray-400">Draft unsaved</span>
                     )}
                   </div>
+                  {activeDraftMeta && (
+                    <div className="text-[10px] text-gray-300 mt-0.5 flex items-center gap-x-2 flex-wrap">
+                      <span>Intern: <span className="font-bold text-white">{activeDraftMeta.created_by_name}</span></span>
+                      {activeDraftMeta.submitted_by_name && (
+                        <span>· Submitted by <span className="font-bold text-white">{activeDraftMeta.submitted_by_name}</span></span>
+                      )}
+                      {activeDraftMeta.last_edited_by_name && (
+                        <span>· Last edited by <span className="font-bold text-white">{activeDraftMeta.last_edited_by_name}</span></span>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1905,7 +2126,9 @@ function ContentStudioApp() {
                 <button
                   type="button"
                   onClick={() => { setBulkPasteResult(null); setShowBulkPasteModal(true); }}
-                  className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 font-bold text-xs rounded transition-all text-white"
+                  disabled={!isDraftOwner}
+                  title={!isDraftOwner ? 'View only - this draft is assigned to another intern' : undefined}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs rounded transition-all text-white"
                 >
                   <ClipboardPaste className="w-3.5 h-3.5" />
                   Paste Data
@@ -1913,7 +2136,9 @@ function ContentStudioApp() {
                 <button
                   type="button"
                   onClick={() => saveDraftToStorage(false)}
-                  className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 font-bold text-xs rounded transition-all text-white"
+                  disabled={!isDraftOwner}
+                  title={!isDraftOwner ? 'View only - this draft is assigned to another intern' : undefined}
+                  className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 disabled:opacity-40 disabled:cursor-not-allowed font-bold text-xs rounded transition-all text-white"
                 >
                   <Save className="w-3.5 h-3.5" />
                   Save Draft
@@ -1988,7 +2213,7 @@ function ContentStudioApp() {
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {draftStatus === 'intern_editing' && !hasAnyAiContent && (
+                {draftStatus === 'intern_editing' && isDraftOwner && !hasAnyAiContent && (
                   <>
                     {pricingEstimate && (
                       <span className="text-[10px] text-gray-300 font-medium">
@@ -2011,13 +2236,13 @@ function ContentStudioApp() {
                     "fill required fields" message reads as if the (locked) AI fields are blocking
                     the button, when in practice it's usually an under-filled repeater (e.g. only 1
                     of 2 required Highlights rows) that the Intern can and must still fill in. */}
-                {draftStatus === 'intern_editing' && !hasAnyAiContent && !factsValidation.isValid && (
+                {draftStatus === 'intern_editing' && isDraftOwner && !hasAnyAiContent && !factsValidation.isValid && (
                   <span className="text-[10px] text-gray-300 font-medium max-w-xs truncate" title={factsValidation.errors.join('\n')}>
                     Missing: {factsValidation.errors.join(' · ')}
                   </span>
                 )}
 
-                {draftStatus === 'intern_editing' && hasAnyAiContent && (
+                {draftStatus === 'intern_editing' && isDraftOwner && hasAnyAiContent && (
                   <>
                     <button
                       type="button"
@@ -2168,6 +2393,18 @@ function ContentStudioApp() {
             </div>
           </header>
 
+          {!isDraftOwner && (
+            <div className="bg-orange-soft border-b border-orange/20 px-6 py-3 flex gap-3 text-sm text-navy">
+              <Lock className="w-4 h-4 text-orange shrink-0 mt-0.5" />
+              <div>
+                <span className="font-bold text-orange uppercase tracking-wide text-[10px]">View only</span>
+                <p className="text-xs text-navy/80 mt-0.5">
+                  This {(SCHEMA_DETAILS[activePageType]?.title || 'page').toLowerCase()} is assigned to {activeDraftMeta?.created_by_name || 'another intern'} - only they can edit it. You can read it, but your changes won't be saved.
+                </p>
+              </div>
+            </div>
+          )}
+
           {latestRevertNote && (
             <div className="bg-info-soft border-b border-info/20 px-6 py-3 flex gap-3 text-sm text-navy">
               <CornerDownRight className="w-4 h-4 text-info shrink-0 mt-0.5" />
@@ -2256,8 +2493,8 @@ function ContentStudioApp() {
                   const isInvalid = showValidationErrors && currentValidation.invalidFields[field.key];
                   const value = formData[field.key];
                   const key = field.key;
-                  const locked = !canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit });
-                  const lockReason = locked ? getLockReason(field, { role: currentUser.role, draftStatus, allowInternAiEdit }) : null;
+                  const locked = !canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner });
+                  const lockReason = locked ? getLockReason(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner }) : null;
 
                   return (
                     <div key={key} id={`field-container-${key}`}>

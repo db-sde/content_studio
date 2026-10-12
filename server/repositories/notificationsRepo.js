@@ -1,5 +1,22 @@
 import { getDb } from '../db/index.js';
 
+// The human-readable name of the draft a notification is about, resolved per page type. This used
+// to be a single COALESCE(university_name, university_full_name, program_name, spec_name) - but a
+// specialization (and a course) draft also carries a university_name, so that list always
+// resolved to the UNIVERSITY's name first and a specialization's own spec_name was never shown.
+// Now each page type leads with its own title, followed by its university for context:
+//   specialization -> "MBA in Marketing Management · UPES"
+//   course         -> "MBA in General Management · NMIMS"
+//   university     -> "NMIMS"
+const draftField = (key) => `NULLIF(btrim((drafts.form_data_json::json)->>'${key}'), '')`;
+const DRAFT_LABEL_SQL = `
+  CASE drafts.page_type
+    WHEN 'specialization' THEN NULLIF(concat_ws(' · ', ${draftField('spec_name')}, ${draftField('university_name')}), '')
+    WHEN 'course' THEN NULLIF(concat_ws(' · ', ${draftField('program_name')}, ${draftField('university_name')}), '')
+    ELSE COALESCE(${draftField('university_name')}, ${draftField('university_full_name')})
+  END
+`;
+
 export async function createNotification({ draftId, type, message, createdByUserId, recipientRole, recipientUserId }) {
   const db = await getDb();
   await db.query(`
@@ -16,15 +33,10 @@ export async function listNotificationsForUser(user) {
   const { rows } = await db.query(`
     SELECT
       notifications.id, notifications.draft_id, notifications.type, notifications.message,
-      notifications.created_at,
+      notifications.created_at, notifications.created_by_user_id,
       users.name AS created_by_name,
       drafts.page_type AS draft_page_type,
-      COALESCE(
-        (drafts.form_data_json::json)->>'university_name',
-        (drafts.form_data_json::json)->>'university_full_name',
-        (drafts.form_data_json::json)->>'program_name',
-        (drafts.form_data_json::json)->>'spec_name'
-      ) AS draft_label
+      ${DRAFT_LABEL_SQL} AS draft_label
     FROM notifications
     JOIN users ON users.id = notifications.created_by_user_id
     JOIN drafts ON drafts.id = notifications.draft_id
@@ -60,12 +72,7 @@ export async function listActivityForUser(user) {
       recipient_user.name AS recipient_user_name,
       drafts.page_type AS draft_page_type,
       drafts.status AS draft_status,
-      COALESCE(
-        (drafts.form_data_json::json)->>'university_name',
-        (drafts.form_data_json::json)->>'university_full_name',
-        (drafts.form_data_json::json)->>'program_name',
-        (drafts.form_data_json::json)->>'spec_name'
-      ) AS draft_label
+      ${DRAFT_LABEL_SQL} AS draft_label
     FROM notifications
     JOIN users creator ON creator.id = notifications.created_by_user_id
     JOIN drafts ON drafts.id = notifications.draft_id

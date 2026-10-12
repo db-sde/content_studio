@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { createDraft, getDraftById, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
+import { createDraft, getDraftById, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setDraftSubmittedBy, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
 import { generateAllAiFields } from '../ai/batchGenerate.js';
 import { getGenerationLogsByDraft } from '../repositories/generationLogsRepo.js';
 import { getEvaluationLogsByDraft } from '../repositories/evaluationLogsRepo.js';
@@ -68,6 +68,23 @@ async function loadDraftOr404(id) {
   return draft;
 }
 
+// A draft belongs to the Intern who created it (created_by_user_id) - there is no separate
+// "assign" step, so creator and assignee are the same person (a revert-to-intern notification
+// already goes to exactly that user). Interns may only edit their own drafts; a different Intern
+// can still open one to read it, but not change it. Seniors and Admins are never restricted - they
+// review and edit every draft by design.
+function isDraftOwnerOrNotIntern(user, draft) {
+  return user.role !== 'intern' || draft.created_by_user_id === user.id;
+}
+
+function assertCanActAsOwner(user, draft) {
+  if (!isDraftOwnerOrNotIntern(user, draft)) {
+    const err = new Error('This draft belongs to another intern - only the intern it is assigned to can edit it');
+    err.status = 403;
+    throw err;
+  }
+}
+
 draftsRouter.get('/', asyncRoute(async (req, res) => {
   res.json({ drafts: await listDrafts() });
 }));
@@ -103,23 +120,29 @@ draftsRouter.put('/:id', asyncRoute(async (req, res) => {
   const permissionCtx = {
     role: req.currentUser.role,
     draftStatus: draft.status,
-    allowInternAiEdit: !!draft.allow_intern_ai_edit
+    allowInternAiEdit: !!draft.allow_intern_ai_edit,
+    isDraftOwner: isDraftOwnerOrNotIntern(req.currentUser, draft)
   };
 
   const safeFormData = { ...draft.form_data };
   const skippedKeys = [];
+  let appliedChanges = 0;
   Object.keys(formData).forEach(key => {
     const incoming = formData[key];
     const changed = JSON.stringify(incoming) !== JSON.stringify(draft.form_data[key]);
     if (!changed) return;
     if (canEditFieldServer(draft.page_type, key, permissionCtx)) {
       safeFormData[key] = incoming;
+      appliedChanges++;
     } else {
       skippedKeys.push(key);
     }
   });
 
-  const updated = await updateDraftFormData(req.params.id, safeFormData);
+  // Only stamp "last edited by" when something was actually changed - autosave fires on a timer
+  // regardless of edits, and a Senior merely having a draft open must not displace the Intern
+  // who really last changed it.
+  const updated = await updateDraftFormData(req.params.id, safeFormData, appliedChanges > 0 ? req.currentUser.id : undefined);
   res.json({ draft: updated, skippedKeys: skippedKeys.length ? skippedKeys : undefined });
 }));
 
@@ -163,6 +186,7 @@ draftsRouter.post(
     if (!['intern', 'senior', 'admin'].includes(req.currentUser.role)) {
       const err = new Error('This role cannot trigger AI generation'); err.status = 403; throw err;
     }
+    assertCanActAsOwner(req.currentUser, draft);
     if (draft.status !== 'intern_editing') {
       const err = new Error('This draft is not with the intern right now'); err.status = 409; throw err;
     }
@@ -184,7 +208,7 @@ draftsRouter.post(
     });
 
     const mergedFormData = { ...draft.form_data, ...values };
-    let updated = await updateDraftFormData(draft.id, mergedFormData);
+    let updated = await updateDraftFormData(draft.id, mergedFormData, req.currentUser.id);
 
     // Only hand the draft off to the Senior once every field actually generated — if some
     // failed, the successful ones are still saved (and won't be re-billed) but the draft stays
@@ -321,11 +345,15 @@ draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
   if (!permitted) {
     const err = new Error(`A ${req.currentUser.role} may not perform "${action}" while this draft is "${draft.status}"`); err.status = 403; throw err;
   }
+  // An Intern can only hand off a draft that is theirs - without this, any Intern could push
+  // another Intern's half-finished specialization to the Senior.
+  assertCanActAsOwner(req.currentUser, draft);
   if (spec.requiresComplete && !validateState(draft.form_data, draft.page_type).isValid) {
     const err = new Error('This draft still has required fields missing'); err.status = 409; throw err;
   }
 
   let updated = await updateDraftStatus(req.params.id, spec.newStatus);
+  if (action === 'send-to-senior') updated = await setDraftSubmittedBy(req.params.id, req.currentUser.id);
 
   if (spec.priority === 'set') updated = await setDraftPriority(req.params.id, true);
   else if (spec.priority === 'clear') updated = await setDraftPriority(req.params.id, false);
