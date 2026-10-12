@@ -182,7 +182,7 @@ draftsRouter.patch('/:id/allow-intern-ai-edit', asyncRoute(async (req, res) => {
 }));
 
 // Senior/Admin hands a draft to a specific Intern. The new assignee becomes the draft's owner - the
-// only Intern who can edit it from now on - and is notified. `userId: null` clears the assignment so
+// only Intern who can edit it from now on - and is notified; so is the intern it was taken from. `userId: null` clears the assignment so
 // ownership falls back to whoever created the draft. Allowed at any stage short of Approved, so a
 // bounced-back draft can be moved to a different Intern, not just a freshly created one.
 draftsRouter.patch('/:id/assign', asyncRoute(async (req, res) => {
@@ -196,11 +196,12 @@ draftsRouter.patch('/:id/assign', asyncRoute(async (req, res) => {
 
   const rawUserId = (req.body || {}).userId;
   const userId = rawUserId === null || rawUserId === undefined ? null : Number(rawUserId);
+  let target = null;
   if (userId !== null) {
     if (!Number.isInteger(userId)) {
       const err = new Error('userId must be an integer or null'); err.status = 400; throw err;
     }
-    const target = await getUserById(userId);
+    target = await getUserById(userId);
     if (!target || target.role !== 'intern' || target.deactivated_at) {
       const err = new Error('Drafts can only be assigned to an active intern'); err.status = 400; throw err;
     }
@@ -210,16 +211,38 @@ draftsRouter.patch('/:id/assign', asyncRoute(async (req, res) => {
   const updated = await setDraftAssignee(draft.id, userId);
   const newOwnerId = getDraftOwnerId(updated);
 
-  // Only notify an actual assignment to an intern (not an unassign, where the "new owner" is just the
-  // creator - possibly a Senior), only when the owner really changed (re-selecting the current intern
-  // is a no-op), and never notify someone about their own action.
-  if (userId !== null && newOwnerId !== previousOwnerId && newOwnerId !== req.currentUser.id) {
-    await createNotification({
-      draftId: draft.id,
-      type: 'assigned_to_intern',
-      createdByUserId: req.currentUser.id,
-      recipientUserId: newOwnerId
-    });
+  // Nothing to tell anyone if the owner didn't actually change (re-selecting the current intern).
+  if (newOwnerId !== previousOwnerId) {
+    const me = req.currentUser.id;
+
+    // The new owner is told only for a real assignment to an intern - not for an unassign, where the
+    // "new owner" is just the creator (possibly a Senior) getting their own draft back.
+    if (userId !== null && newOwnerId !== me) {
+      await createNotification({
+        draftId: draft.id,
+        type: 'assigned_to_intern',
+        createdByUserId: me,
+        recipientUserId: newOwnerId
+      });
+    }
+
+    // The previous owner is told they lost it - but only if they were an (active) intern; a Senior or
+    // Admin who created the draft was never "working on it" in that sense and loses nothing.
+    if (previousOwnerId !== me) {
+      const previousOwner = await getUserById(previousOwnerId);
+      if (previousOwner && previousOwner.role === 'intern' && !previousOwner.deactivated_at) {
+        const newOwner = target || await getUserById(newOwnerId);
+        await createNotification({
+          draftId: draft.id,
+          type: 'unassigned_from_intern',
+          message: userId !== null
+            ? `Reassigned to ${newOwner?.name || 'another intern'}`
+            : `Assignment cleared - back with ${newOwner?.name || 'its creator'}`,
+          createdByUserId: me,
+          recipientUserId: previousOwnerId
+        });
+      }
+    }
   }
 
   res.json({ draft: updated });

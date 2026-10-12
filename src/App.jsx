@@ -377,7 +377,9 @@ function ContentStudioApp() {
         const incoming = fresh.filter(n => n.created_by_user_id !== currentUser?.id);
         incoming.slice(0, 3).forEach(n => {
           const verb = NOTIFICATION_TYPE_VERBS[n.type] || 'updated';
-          toastRef.current.info(`${n.created_by_name} ${verb}: ${n.draft_label || 'a draft'}`, 15000);
+          // A "took you off" notice carries where the draft went ("Reassigned to ...") - worth showing.
+          const detail = n.type === 'unassigned_from_intern' && n.message ? ` (${n.message})` : '';
+          toastRef.current.info(`${n.created_by_name} ${verb}: ${n.draft_label || 'a draft'}${detail}`, 15000);
         });
         if (incoming.length > 3) toastRef.current.info(`...and ${incoming.length - 3} more new notifications - click the bell.`, 15000);
       }

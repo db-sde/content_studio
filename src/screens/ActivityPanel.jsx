@@ -87,7 +87,13 @@ export const ActivityPanel = ({ onClose, onOpenDraft }) => {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-xs text-navy">
-                        {item.type === 'assigned_to_intern' ? (
+                        {item.type === 'unassigned_from_intern' ? (
+                          item.direction === 'sent' ? (
+                            <>You took <span className="font-bold">{counterpartName(item)}</span> off this draft</>
+                          ) : (
+                            <><span className="font-bold">{counterpartName(item)}</span> took you off this draft</>
+                          )
+                        ) : item.type === 'assigned_to_intern' ? (
                           item.direction === 'sent' ? (
                             <>You assigned this draft to <span className="font-bold">{counterpartName(item)}</span></>
                           ) : (
@@ -99,12 +105,15 @@ export const ActivityPanel = ({ onClose, onOpenDraft }) => {
                           <><span className="font-bold">{counterpartName(item)}</span> {NOTIFICATION_TYPE_VERBS[item.type]} to you</>
                         )}
                       </p>
-                      <span className={`shrink-0 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                        item.resolved ? 'bg-green-soft text-green-success' : 'bg-orange-soft text-orange'
-                      }`}>
-                        {item.resolved ? <CheckCircle className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
-                        {item.resolved ? 'Fixed' : 'Pending'}
-                      </span>
+                      {/* Informational only - there's nothing for the old intern to act on or "fix". */}
+                      {item.type !== 'unassigned_from_intern' && (
+                        <span className={`shrink-0 flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
+                          item.resolved ? 'bg-green-soft text-green-success' : 'bg-orange-soft text-orange'
+                        }`}>
+                          {item.resolved ? <CheckCircle className="w-2.5 h-2.5" /> : <Clock className="w-2.5 h-2.5" />}
+                          {item.resolved ? 'Fixed' : 'Pending'}
+                        </span>
+                      )}
                     </div>
                     <p className="text-xs font-semibold text-muted mt-0.5">{item.draft_label || 'a draft'}</p>
                     {item.message && (
