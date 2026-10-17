@@ -29,8 +29,10 @@ export function createApp() {
   app.use(cors({ origin: config.frontendUrl || true, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
 
+  // `commit` (Render sets RENDER_GIT_COMMIT) shows from outside which version is actually live
+  // after a redeploy.
   app.get('/api/health', (req, res) => {
-    res.json({ ok: true });
+    res.json({ ok: true, commit: (process.env.RENDER_GIT_COMMIT || '').slice(0, 7) || null });
   });
 
   app.use('/api/auth', authRouter);
