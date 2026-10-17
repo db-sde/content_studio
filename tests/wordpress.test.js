@@ -17,9 +17,10 @@ before(async () => {
   const app = express();
   app.use(express.json());
   app.use((req, res) => {
-    requests.push({ method: req.method, path: req.path, auth: req.headers.authorization, body: req.body });
-    const [status, body] = reply;
-    res.status(status).json(body);
+    requests.push({ method: req.method, path: req.path, auth: req.headers.authorization, userAgent: req.headers['user-agent'], body: req.body });
+    const [status, body, headers = {}] = reply;
+    res.status(status).set(headers);
+    if (typeof body === 'string') res.type('html').send(body); else res.json(body);
   });
   server = await new Promise(resolve => { const s = app.listen(0, '127.0.0.1', () => resolve(s)); });
   Object.assign(config.wordpress, { siteUrl: `http://127.0.0.1:${server.address().port}`, appUser: 'editor', appPassword: 'abcd efgh ijkl mnop qrst uvwx' });
@@ -45,13 +46,19 @@ test('a successful publish sends the title, ACF fields and Basic auth to the pos
   assert.equal(requests[0].path, '/wp-json/wp/v2/specialization');
   assert.equal(requests[0].auth, 'Basic ' + Buffer.from('editor:abcd efgh ijkl mnop qrst uvwx').toString('base64'));
   assert.deepEqual(requests[0].body, { title: 'Online MBA', status: 'publish', acf: { about_content: '<p>x</p>' } });
+  assert.match(requests[0].userAgent, /DegreeBaba-Content-Studio/);
 });
 
 test('each WordPress failure names its real cause', async () => {
   const cases = [
     [[401, { code: 'rest_not_logged_in', message: 'You are not currently logged in.' }], /dropping the "Authorization" header/],
     [[401, { code: 'incorrect_password', message: 'The provided password is an invalid application password.' }], /WORDPRESS_APP_PASSWORD/],
-    [[403, { code: 'rest_cannot_create', message: 'Sorry, you are not allowed to create posts as this user.' }], /Editor or Administrator/],
+    [[401, { code: 'rest_cannot_create', message: 'Sorry, you are not allowed to create posts as this user.' }], /dropping the "Authorization" header/],
+    [[403, { code: 'rest_cannot_create', message: 'Sorry, you are not allowed to create posts as this user.' }], /won't let that user publish/],
+    // What a Cloudflare/firewall block looks like: an HTML page, no WordPress code. Not a role problem.
+    [[403, '<!DOCTYPE html><title>Attention Required! | Cloudflare</title>', { server: 'cloudflare', 'cf-ray': '8f1e2d3c4b5a6978-BOM', 'cf-mitigated': 'challenge' }],
+      /blocked before it reached WordPress \(403, Cloudflare challenge\) - by Cloudflare.*role isn't the problem.*ray ID: 8f1e2d3c4b5a6978-BOM/],
+    [[403, '<html>403 Forbidden</html>'], /blocked before it reached WordPress \(403\) - by a firewall/],
     [[404, { code: 'rest_no_route', message: 'No route was found matching the URL and request method.' }], /no "specialization" post type/]
   ];
   for (const [r, expected] of cases) {
