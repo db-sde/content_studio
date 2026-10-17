@@ -1,5 +1,14 @@
 import 'dotenv/config';
 
+// Reads a numeric env var, falling back to `fallback` when it's unset or not a number - a typo in
+// an env var must never silently turn a limit into NaN (which would disable every comparison).
+function numberFromEnv(name, fallback) {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
+
 export const config = {
   port: Number(process.env.PORT || 4000),
   // Neon (hosted Postgres) connection string, e.g. postgres://user:pass@ep-xxx.neon.tech/dbname?sslmode=require
@@ -44,6 +53,34 @@ export const config = {
       course: process.env.WORDPRESS_POST_TYPE_COURSE || 'courses',
       specialization: process.env.WORDPRESS_POST_TYPE_SPECIALIZATION || 'specializations'
     }
+  },
+
+  // Hard ceilings on everything that costs money or database capacity, each overridable by env var
+  // without a code change. These exist because both real outages so far were "nothing stopped it":
+  // the Anthropic balance ran dry, then the database's monthly data-transfer quota ran out.
+  // tests/limits.test.js and tests/static-guards.test.js fail if any of these protections is
+  // removed or bypassed.
+  limits: {
+    // Total Claude + GPT spend allowed per UTC day across the whole app (from generation_logs +
+    // evaluation_logs). New AI requests are refused with a clear message once reached. <= 0 = no cap.
+    aiDailyBudgetUsd: numberFromEnv('AI_DAILY_BUDGET_USD', 15),
+    // Image generation/regeneration requests per user per hour (each one is a paid FLUX + Claude
+    // call in image_pipeline/, and a blog page is 4 images).
+    imageGenerationsPerHour: numberFromEnv('IMAGE_GENERATIONS_PER_HOUR', 30),
+    // Any authenticated API request, per user per 5 minutes - normal use (polls, autosave, edits)
+    // is well under 100; this only exists to stop a runaway browser tab or script from hammering
+    // the database.
+    apiRequestsPer5Min: numberFromEnv('API_REQUESTS_PER_5_MIN', 600),
+    // Failed sign-in attempts per email address per 15 minutes before that account is paused.
+    loginFailuresPer15Min: numberFromEnv('LOGIN_FAILURES_PER_15_MIN', 10),
+    // Postgres kills any single statement running longer than this (protects billed compute from
+    // a runaway query), and gives up connecting after connectTimeout instead of hanging forever.
+    dbStatementTimeoutMs: numberFromEnv('DB_STATEMENT_TIMEOUT_MS', 15000),
+    dbConnectTimeoutMs: numberFromEnv('DB_CONNECT_TIMEOUT_MS', 10000),
+    // Outbound calls to services we don't control. The image pipeline gets longer because a
+    // freshly woken Render instance can take ~30-50s to answer its first request.
+    imagePipelineTimeoutMs: numberFromEnv('IMAGE_PIPELINE_TIMEOUT_MS', 60000),
+    wordpressTimeoutMs: numberFromEnv('WORDPRESS_TIMEOUT_MS', 30000)
   },
 
   // The separate Python/FastAPI image-generation service (image_pipeline/) — see

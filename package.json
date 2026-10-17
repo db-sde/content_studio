@@ -13,7 +13,10 @@
     "server:dev": "node --watch server/index.js",
     "dev:all": "concurrently \"npm run dev\" \"npm run server:dev\"",
     "db:migrate-data": "node server/db/migrateSqliteToPostgres.js",
-    "db:backfill-directory": "node server/db/backfillDirectoryEntries.js"
+    "db:backfill-directory": "node server/db/backfillDirectoryEntries.js",
+    "test": "node --test --test-timeout=60000 \"tests/*.test.js\"",
+    "test:python": "cd image_pipeline && venv/bin/python -m pytest tests -q",
+    "check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.68.0",
@@ -38,6 +41,7 @@
     "tailwindcss": "^4.3.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.10",
     "@eslint/js": "^10.0.1",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

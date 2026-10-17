@@ -1728,6 +1728,13 @@ function ContentStudioApp() {
                       <Sparkles className="w-3.5 h-3.5 text-orange" />
                       Total AI cost so far: <span className="font-extrabold">₹{globalCostSummary.totalInr.toFixed(2)}</span>
                       across {globalCostSummary.draftsTouched} draft{globalCostSummary.draftsTouched === 1 ? '' : 's'}
+                      {/* Today's spend against the server's daily cap (config.limits.aiDailyBudgetUsd),
+                          so the limit is visible before anyone hits it. */}
+                      {globalCostSummary.today?.budgetInr != null && (
+                        <span className={`ml-1 pl-2 border-l border-navy/15 ${globalCostSummary.today.spentInr >= globalCostSummary.today.budgetInr * 0.8 ? 'text-danger' : 'text-muted'}`}>
+                          Today: ₹{globalCostSummary.today.spentInr.toFixed(2)} of ₹{globalCostSummary.today.budgetInr.toFixed(0)} daily limit
+                        </span>
+                      )}
                     </div>
                   )}
                 </div>

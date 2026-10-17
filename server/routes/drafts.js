@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { imageGenerationLimiter } from '../middleware/limits.js';
+import { requireAiBudget } from '../ai/budget.js';
 import { createDraft, getDraftById, getDraftStatusInfo, getDraftOwnerId, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setDraftSubmittedBy, setDraftAssignee, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
 import { getUserById, listActiveInterns } from '../repositories/usersRepo.js';
 import { generateAllAiFields } from '../ai/batchGenerate.js';
@@ -280,6 +282,7 @@ draftsRouter.patch('/:id/assign', asyncRoute(async (req, res) => {
 draftsRouter.post(
   '/:id/generate-all-fields',
   rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyFn: (req) => req.currentUser.id }),
+  requireAiBudget,
   asyncRoute(async (req, res) => {
     const draft = await loadDraftOr404(req.params.id);
     if (!['intern', 'senior', 'admin'].includes(req.currentUser.role)) {
@@ -567,7 +570,7 @@ function requireSeniorOrAdminForImagePipeline(req) {
   }
 }
 
-draftsRouter.post('/:id/generate-images', asyncRoute(async (req, res) => {
+draftsRouter.post('/:id/generate-images', imageGenerationLimiter, asyncRoute(async (req, res) => {
   const draft = await loadDraftOr404(req.params.id);
   requireSeniorOrAdminForImagePipeline(req);
   // University pages don't generate images at all — the pipeline's own PageType schema would
@@ -596,7 +599,7 @@ draftsRouter.get('/:id/image-history', asyncRoute(async (req, res) => {
   res.json(await getImageHistory(req.params.id));
 }));
 
-draftsRouter.post('/:id/regenerate-image', asyncRoute(async (req, res) => {
+draftsRouter.post('/:id/regenerate-image', imageGenerationLimiter, asyncRoute(async (req, res) => {
   await loadDraftOr404(req.params.id);
   requireSeniorOrAdminForImagePipeline(req);
   const { imageId, promptOverride } = req.body;

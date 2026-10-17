@@ -13,6 +13,10 @@ const ROLE_LABELS = { hero: 'Hero Banner', body1: 'Supporting Image 1', body2: '
 // roles actually rendered are whatever the backend's status response comes back with.
 const ALL_ROLES = ['hero', 'body1', 'body2', 'body3'];
 const POLL_MS = 2500;
+// A job normally finishes in well under a minute. If it's still "processing" after this long, the
+// image service most likely lost it (e.g. restarted mid-job) - stop polling rather than hitting the
+// server every 2.5s for as long as the panel stays open.
+const MAX_POLL_MS = 5 * 60 * 1000;
 
 const emptyPrompt = () => ({ subject: '', background: '', composition: '', lighting: '', style: '', negative_prompt: [] });
 
@@ -86,7 +90,15 @@ export const ImageGenerationPanel = ({ mode, draftId, pageJson, pageType, file, 
 
   useEffect(() => {
     if (status?.status === 'processing' && externalRef) {
-      pollRef.current = setInterval(() => refreshStatus(externalRef), POLL_MS);
+      const startedAt = Date.now();
+      pollRef.current = setInterval(() => {
+        if (Date.now() - startedAt > MAX_POLL_MS) {
+          clearInterval(pollRef.current);
+          setLoadError('This is taking much longer than usual, so automatic refreshing has stopped. Close and reopen this panel to check again.');
+          return;
+        }
+        refreshStatus(externalRef);
+      }, POLL_MS);
       return () => clearInterval(pollRef.current);
     }
     return undefined;

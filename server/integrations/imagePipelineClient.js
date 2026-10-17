@@ -3,10 +3,25 @@ import { config, assertImagePipelineConfigured } from '../config.js';
 // The only file that talks to the image_pipeline service directly. Attaches the shared-secret
 // X-Pipeline-Key header server-side — same convention as wordpressClient.js keeping WordPress
 // credentials off the browser — so the frontend never sees or needs this key.
+// Every outbound call gets a deadline (config.limits.imagePipelineTimeoutMs): without one, a hung
+// image service would hold each request - and its database connection slot - open indefinitely.
+async function fetchWithTimeout(url, options) {
+  try {
+    return await fetch(url, { ...options, signal: AbortSignal.timeout(config.limits.imagePipelineTimeoutMs) });
+  } catch (e) {
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      const err = new Error(`The image service didn't respond within ${Math.max(1, Math.round(config.limits.imagePipelineTimeoutMs / 1000))}s - it may be starting up; try again in a minute.`);
+      err.status = 504;
+      throw err;
+    }
+    throw e;
+  }
+}
+
 async function pipelineRequest(path, { method = 'GET', body } = {}) {
   assertImagePipelineConfigured();
 
-  const res = await fetch(`${config.imagePipeline.baseUrl}${path}`, {
+  const res = await fetchWithTimeout(`${config.imagePipeline.baseUrl}${path}`, {
     method,
     headers: {
       'Content-Type': 'application/json',
@@ -42,7 +57,7 @@ export async function generateImagesFromDocx({ fileBuffer, fileName, pageType, e
   form.append('page_type', pageType);
   form.append('external_ref', externalRef);
 
-  const res = await fetch(`${config.imagePipeline.baseUrl}/generate-images-from-docx`, {
+  const res = await fetchWithTimeout(`${config.imagePipeline.baseUrl}/generate-images-from-docx`, {
     method: 'POST',
     headers: { 'X-Pipeline-Key': config.imagePipeline.apiKey },
     body: form

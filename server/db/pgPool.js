@@ -14,6 +14,12 @@ function sslConfigFor(connectionString) {
   return isLocal ? false : { rejectUnauthorized: false };
 }
 
+// Lets the test suite run the real app against an in-memory Postgres (see tests/helpers/) - the
+// rest of the app keeps calling getPool()/getDb() exactly as in production.
+export function __setPoolForTests(testPool) {
+  pool = testPool;
+}
+
 export function getPool() {
   if (pool) return pool;
 
@@ -23,7 +29,11 @@ export function getPool() {
 
   pool = new Pool({
     connectionString: config.databaseUrl,
-    ssl: sslConfigFor(config.databaseUrl)
+    ssl: sslConfigFor(config.databaseUrl),
+    // A runaway query is billed compute on Neon; a hung connect (e.g. the database over quota)
+    // would otherwise hold a request open forever. See config.limits.
+    statement_timeout: config.limits.dbStatementTimeoutMs,
+    connectionTimeoutMillis: config.limits.dbConnectTimeoutMs
   });
 
   // node-postgres emits 'error' on the pool whenever an *idle* client hits a backend-side

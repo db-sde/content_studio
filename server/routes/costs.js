@@ -3,6 +3,7 @@ import { asyncRoute } from '../middleware/errorHandler.js';
 import { getGenerationUsageTotals } from '../repositories/generationLogsRepo.js';
 import { getEvaluationUsageTotals } from '../repositories/evaluationLogsRepo.js';
 import { computeCostUsdForUsage, usdToInr } from '../ai/pricing.js';
+import { getAiBudgetStatus } from '../ai/budget.js';
 
 export const costsRouter = Router();
 
@@ -17,11 +18,21 @@ costsRouter.get('/summary', asyncRoute(async (req, res) => {
 
   const totalUsd = computeCostUsdForUsage([...generation, ...evaluation]);
 
+  // Today's spend against the daily cap (server/ai/budget.js), so the limit is visible before
+  // anyone runs into it rather than only as an error once it's hit.
+  const budget = await getAiBudgetStatus();
+
   res.json({
     totalUsd,
     totalInr: usdToInr(totalUsd),
     generateCalls: generation.reduce((n, r) => n + r.calls, 0),
     evaluateCalls: evaluation.reduce((n, r) => n + r.calls, 0),
-    draftsTouched
+    draftsTouched,
+    today: {
+      spentUsd: budget.spentUsd,
+      spentInr: usdToInr(budget.spentUsd),
+      budgetUsd: budget.capped ? budget.budgetUsd : null,
+      budgetInr: budget.capped ? usdToInr(budget.budgetUsd) : null
+    }
   });
 }));

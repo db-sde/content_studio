@@ -34,3 +34,7 @@ image_pipeline/media
 *.njsproj
 *.sln
 *.sw?
+
+# test caches
+.pytest_cache/
+image_pipeline/.pytest_cache/

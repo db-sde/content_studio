@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { requireRole } from '../middleware/auth.js';
 import { rateLimit } from '../middleware/rateLimit.js';
+import { requireAiBudget } from '../ai/budget.js';
 import * as anthropicProvider from '../ai/providers/anthropicProvider.js';
 import * as openaiProvider from '../ai/providers/openaiProvider.js';
 import { generateAndEvaluateField } from '../ai/orchestrator.js';
@@ -24,6 +25,7 @@ aiRouter.post(
   '/generate-field',
   requireRole('senior', 'admin'),
   rateLimit({ windowMs: 5 * 60 * 1000, max: 40, keyFn: (req) => req.currentUser.id }),
+  requireAiBudget,
   asyncRoute(async (req, res) => {
     const { draftId, pageType, fieldKey, fieldLabel, fieldInstructions, outputFormat, facts, mode, existingContent } = req.body || {};
 
@@ -61,7 +63,7 @@ aiRouter.post(
 // M1 throwaway endpoint: proves both provider adapters + API keys work end-to-end,
 // independent of any orchestration/business logic (added in M2). Still costs real tokens on
 // every call, so it's rate-limited the same as the real generation routes.
-aiRouter.post('/test-generate', rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyFn: (req) => req.currentUser.id }), asyncRoute(async (req, res) => {
+aiRouter.post('/test-generate', rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyFn: (req) => req.currentUser.id }), requireAiBudget, asyncRoute(async (req, res) => {
   const prompt = 'Reply with exactly the single word: pong';
 
   const [claudeReply, gptReply] = await Promise.all([

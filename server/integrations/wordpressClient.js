@@ -26,18 +26,30 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
   const base = `${config.wordpress.siteUrl}/wp-json/wp/v2/${slug}`;
   const url = existingPostId ? `${base}/${existingPostId}` : base;
 
-  const res = await fetch(url, {
-    method: existingPostId ? 'PUT' : 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: authHeader()
-    },
-    body: JSON.stringify({
-      title,
-      status: 'publish',
-      acf: acfFields
-    })
-  });
+  let res;
+  try {
+    res = await fetch(url, {
+      method: existingPostId ? 'PUT' : 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: authHeader()
+      },
+      body: JSON.stringify({
+        title,
+        status: 'publish',
+        acf: acfFields
+      }),
+      // A slow or unreachable WordPress host must not hold the request open forever.
+      signal: AbortSignal.timeout(config.limits.wordpressTimeoutMs)
+    });
+  } catch (e) {
+    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+      const err = new Error(`WordPress didn't respond within ${Math.max(1, Math.round(config.limits.wordpressTimeoutMs / 1000))}s - nothing was published; try again.`);
+      err.status = 504;
+      throw err;
+    }
+    throw e;
+  }
 
   const body = await res.json().catch(() => null);
 

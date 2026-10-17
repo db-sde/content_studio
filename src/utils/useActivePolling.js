@@ -17,9 +17,15 @@ export const SLOW_POLL_INTERVAL_MS = 5 * 60 * 1000;
 
 // No click/key/scroll/mouse movement for this long counts as "walked away" - a browser tab left open
 // overnight or over a weekend used to keep hitting the database (and keep it awake) around the clock.
-const IDLE_AFTER_MS = 10 * 60 * 1000;
+export const IDLE_AFTER_MS = 10 * 60 * 1000;
 
 const ACTIVITY_EVENTS = ['pointerdown', 'pointermove', 'keydown', 'wheel', 'touchstart'];
+
+// The one rule deciding whether a timer tick may hit the server - pure so tests can pin it down
+// (tests/frontend.test.js): only a visible tab whose user did something recently.
+export function isUserActive({ visibilityState, lastActivityAt, now, idleAfterMs = IDLE_AFTER_MS }) {
+  return visibilityState === 'visible' && now - lastActivityAt < idleAfterMs;
+}
 
 // Calls `callback` immediately and then every `intervalMs` - but only while the tab is visible AND
 // the user has done something within the last IDLE_AFTER_MS. The moment they come back (switch back
@@ -40,7 +46,7 @@ export function useActivePolling(callback, intervalMs, { enabled = true, immedia
     if (!enabled) return undefined;
 
     let lastActivity = Date.now();
-    const isActive = () => document.visibilityState === 'visible' && Date.now() - lastActivity < IDLE_AFTER_MS;
+    const isActive = () => isUserActive({ visibilityState: document.visibilityState, lastActivityAt: lastActivity, now: Date.now() });
     const run = () => callbackRef.current();
 
     const onActivity = () => {

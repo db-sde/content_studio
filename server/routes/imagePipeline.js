@@ -2,6 +2,7 @@ import { Router } from 'express';
 import crypto from 'crypto';
 import multer from 'multer';
 import { asyncRoute } from '../middleware/errorHandler.js';
+import { imageGenerationLimiter } from '../middleware/limits.js';
 import { generateImages, generateImagesFromDocx, getGenerationStatus, getImageHistory, regenerateImage, getCurrentPrompt, patchPrompt, deleteImage } from '../integrations/imagePipelineClient.js';
 
 // Standalone entry point into the image pipeline for someone who already has a page's JSON but
@@ -31,7 +32,7 @@ function newExternalRef() {
   return `adhoc_${Date.now()}_${crypto.randomBytes(4).toString('hex')}`;
 }
 
-imagePipelineRouter.post('/generate-images', asyncRoute(async (req, res) => {
+imagePipelineRouter.post('/generate-images', imageGenerationLimiter, asyncRoute(async (req, res) => {
   requireSeniorOrAdmin(req);
   const { pageJson, pageType, label } = req.body;
   if (!pageJson || typeof pageJson !== 'object' || Array.isArray(pageJson)) {
@@ -46,7 +47,7 @@ imagePipelineRouter.post('/generate-images', asyncRoute(async (req, res) => {
   res.status(202).json({ ...result, externalRef, label: label || null });
 }));
 
-imagePipelineRouter.post('/generate-images-from-docx', upload.single('file'), asyncRoute(async (req, res) => {
+imagePipelineRouter.post('/generate-images-from-docx', imageGenerationLimiter, upload.single('file'), asyncRoute(async (req, res) => {
   requireSeniorOrAdmin(req);
   const { pageType, label } = req.body;
   if (!req.file) {
@@ -73,7 +74,7 @@ imagePipelineRouter.get('/image-history/:ref', asyncRoute(async (req, res) => {
   res.json(await getImageHistory(req.params.ref));
 }));
 
-imagePipelineRouter.post('/regenerate-image', asyncRoute(async (req, res) => {
+imagePipelineRouter.post('/regenerate-image', imageGenerationLimiter, asyncRoute(async (req, res) => {
   requireSeniorOrAdmin(req);
   const { imageId, promptOverride } = req.body;
   res.json(await regenerateImage({ imageId, promptOverride, createdBy: req.currentUser.name }));

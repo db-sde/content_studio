@@ -7,6 +7,25 @@ import { countUsers, createUser, getUserByEmail, getUserById, updatePassword } f
 import { createSession, deleteSession } from '../repositories/sessionsRepo.js';
 import { createInvite, getOpenInvite, markInviteUsed } from '../repositories/invitesRepo.js';
 import { createPasswordReset, getOpenPasswordReset, markPasswordResetUsed } from '../repositories/passwordResetsRepo.js';
+import { config } from '../config.js';
+
+// Failed sign-ins per email address in a sliding 15-minute window. Keyed by email, not IP: behind
+// Render's proxy every visitor can arrive from the same address, so an IP-based limit would lock
+// the whole team out at once. Only FAILURES count, and a successful sign-in clears them - so a
+// person who mistypes once is never affected; someone guessing passwords is stopped after a few.
+const LOGIN_WINDOW_MS = 15 * 60 * 1000;
+const loginFailures = new Map(); // email -> timestamps[]
+
+function recentLoginFailures(email, now = Date.now()) {
+  const recent = (loginFailures.get(email) || []).filter(t => now - t < LOGIN_WINDOW_MS);
+  if (recent.length) loginFailures.set(email, recent); else loginFailures.delete(email);
+  return recent;
+}
+
+// Tests only.
+export function __resetLoginThrottleForTests() {
+  loginFailures.clear();
+}
 
 export const authRouter = Router();
 
@@ -69,18 +88,31 @@ authRouter.post('/login', asyncRoute(async (req, res) => {
   const { email, password } = req.body || {};
   if (!email || !password) throw badRequest('email and password are required');
 
+  const throttleKey = String(email).trim().toLowerCase();
+  const failures = recentLoginFailures(throttleKey);
+  if (failures.length >= config.limits.loginFailuresPer15Min) {
+    const retryInMin = Math.max(1, Math.ceil((failures[0] + LOGIN_WINDOW_MS - Date.now()) / 60000));
+    const err = new Error(`Too many failed sign-in attempts for this account. Try again in ${retryInMin} minute${retryInMin === 1 ? '' : 's'}.`);
+    err.status = 429;
+    throw err;
+  }
+  const recordFailure = () => loginFailures.set(throttleKey, [...recentLoginFailures(throttleKey), Date.now()]);
+
   // Checked before touching the DB at all — an account whose email somehow isn't
   // @degreebaba.com (a stale row, a manual DB edit) should never be able to log in, regardless
   // of whether the password would otherwise be correct.
   if (!isAllowedEmailDomain(email)) {
+    recordFailure();
     const err = new Error('Invalid email or password'); err.status = 401; throw err;
   }
 
   const row = await getUserByEmail(email);
   if (!row || row.deactivated_at || !verifyPassword(password, row.password_hash)) {
+    recordFailure();
     const err = new Error('Invalid email or password'); err.status = 401; throw err;
   }
 
+  loginFailures.delete(throttleKey);
   const user = await getUserById(row.id);
   await logIn(res, user);
   res.json({ user });

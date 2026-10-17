@@ -12,6 +12,7 @@ import { directoryRouter } from './routes/directory.js';
 import { imagePipelineRouter } from './routes/imagePipeline.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireAuth } from './middleware/auth.js';
+import { apiRequestLimiter } from './middleware/limits.js';
 import { config } from './config.js';
 
 // Express app factory (kept separate from index.js/boot sequence so it's importable in tests
@@ -35,15 +36,18 @@ export function createApp() {
   app.use('/api/auth', authRouter);
   // Every route beyond /api/auth talks to AI providers, the drafts table, or the audit trail
   // that feeds them — none of it should ever be reachable without a valid session.
-  app.use('/api/ai', requireAuth, aiRouter);
-  app.use('/api/field-records', requireAuth, fieldRecordsRouter);
-  app.use('/api/learning-queue', requireAuth, learningQueueRouter);
-  app.use('/api/style-versions', requireAuth, styleVersionsRouter);
-  app.use('/api/drafts', requireAuth, draftsRouter);
-  app.use('/api/notifications', requireAuth, notificationsRouter);
-  app.use('/api/costs', requireAuth, costsRouter);
-  app.use('/api/directory', requireAuth, directoryRouter);
-  app.use('/api/image-pipeline', requireAuth, imagePipelineRouter);
+  // apiRequestLimiter caps each signed-in user's total request rate (see config.limits) so a
+  // runaway client can't hammer the database for everyone.
+  const authed = [requireAuth, apiRequestLimiter];
+  app.use('/api/ai', ...authed, aiRouter);
+  app.use('/api/field-records', ...authed, fieldRecordsRouter);
+  app.use('/api/learning-queue', ...authed, learningQueueRouter);
+  app.use('/api/style-versions', ...authed, styleVersionsRouter);
+  app.use('/api/drafts', ...authed, draftsRouter);
+  app.use('/api/notifications', ...authed, notificationsRouter);
+  app.use('/api/costs', ...authed, costsRouter);
+  app.use('/api/directory', ...authed, directoryRouter);
+  app.use('/api/image-pipeline', ...authed, imagePipelineRouter);
 
   app.use(errorHandler);
 

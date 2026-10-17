@@ -147,6 +147,20 @@ absolute path, so it works the same regardless of which directory you launch fro
 
 Set `PROVIDER_MODE=mock` to run without any real provider keys or cost.
 
+## Tests
+
+```bash
+cd image_pipeline
+pip install -r requirements-dev.txt
+python -m pytest tests -q
+```
+
+`tests/test_cost_guards.py` pins everything here that turns into a bill: images per page type
+(university 0, blog 4, the rest 1), exactly one image per FLUX call on the dev model with a
+timeout, the retry ceiling, and the 100 KB stored-file budget. `tests/conftest.py` forces the free
+mock provider and blocks all outbound `httpx` calls, so the suite can never spend money. CI runs it
+on every push. See `../tests/README.md` for the whole picture.
+
 ## Deployment
 
 Deployed as its own Render web service, separate from the Node app — a different language
