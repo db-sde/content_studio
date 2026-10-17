@@ -1,5 +1,8 @@
 import { generateAndEvaluateField } from './orchestrator.js';
+import { warmPageCache } from './writer.js';
+import { getActiveStyle } from './styleEngine.js';
 import { upsertFieldRecord } from '../repositories/fieldRecordsRepo.js';
+import { insertGenerationLog, CACHE_WARMUP_ATTEMPT } from '../repositories/generationLogsRepo.js';
 import { isRichTextEmpty } from '../../src/config/schemas.js';
 
 const CONCURRENCY = 3;
@@ -21,6 +24,27 @@ async function runWithConcurrencyLimit(items, worker, limit) {
   return results;
 }
 
+// Every field on a page shares one cached prompt prefix (system prompt + the page's facts - see
+// writer.generateField), but a cache entry can't be read until a request writing it has started
+// responding, so the first CONCURRENCY fields starting together would each pay to write it. One
+// warm-up call writes it first. It's billed, so it's logged like any call. If it fails the fields
+// still run, just without the saving on the first few.
+async function warmPromptCache({ draftId, pageType, facts }) {
+  try {
+    const style = await getActiveStyle();
+    const { model, usage } = await warmPageCache({ facts, styleProfile: style.style_json });
+    await insertGenerationLog({
+      draftId, pageType, fieldKey: '_prompt_cache_warmup', attemptNumber: CACHE_WARMUP_ATTEMPT,
+      model, prompt: '(prompt cache warm-up: writes the shared system prompt and facts, generates nothing)',
+      factsJson: '{}', styleVersion: style.version, output: '',
+      inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
+      cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens
+    });
+  } catch (e) {
+    console.warn('[generate-all] prompt cache warm-up failed, continuing without it:', e.message || e);
+  }
+}
+
 // One batch entry point behind both the initial "Generate All AI Fields" (onlyEmpty: false) and
 // the post-revert "Generate Empty Fields" (onlyEmpty: true) actions. `fields` and `currentValues`
 // are client-supplied (schemas.js is the frontend's single source of truth for field metadata —
@@ -33,6 +57,8 @@ export async function generateAllAiFields({ draftId, pageType, fields, facts, cu
     if (!onlyEmpty) return true;
     return isRichTextEmpty(currentValues[f.fieldKey]);
   });
+
+  if (toGenerate.length > 1) await warmPromptCache({ draftId, pageType, facts });
 
   // Each field's failure is caught individually rather than left to reject the pool's Promise.all
   // — a single transient timeout used to abort the entire batch and discard every other field's

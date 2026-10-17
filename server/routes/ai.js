@@ -85,18 +85,23 @@ aiRouter.post('/test-generate', rateLimit({ windowMs: 5 * 60 * 1000, max: 10, ke
   });
 }));
 
-// Reference per-field token assumptions — approximate, not measured from real calls; used only
-// to give the Intern a rough pre-generate cost estimate before any API call is made. Field
-// counts per page type mirror src/config/schemas.js's aiAssist fields (backend doesn't import
-// frontend code, so these are a coarse, occasionally-drifting approximation, not a live count).
+// Rough pre-generate estimate for the Intern, before any API call is made. Field counts per page
+// type mirror src/config/schemas.js's aiAssist fields (backend doesn't import frontend code, so
+// these are a coarse, occasionally-drifting approximation, not a live count): `seo` is the SEO
+// title + meta description (Claude only - checked by rules, see ai/seoChecks.js), `narrative` is
+// everything else (Claude + one GPT evaluation). Claude figures were measured on real pages with
+// prompt caching on (Oct 2026; output includes Sonnet's thinking, which varies a lot per call);
+// the GPT figures are the old measured size less what compact JSON and caching save. Retries
+// aren't included.
 const AI_ASSIST_FIELD_COUNTS = {
-  university: { cheap: 2, normal: 8 },
-  course: { cheap: 2, normal: 7 },
-  specialization: { cheap: 2, normal: 7 }
+  university: { seo: 2, narrative: 8 },
+  course: { seo: 2, narrative: 7 },
+  specialization: { seo: 2, narrative: 7 }
 };
-const CHEAP_FIELD_TOKENS = { input: 900, output: 30 };
-const NORMAL_FIELD_TOKENS = { input: 1000, output: 150 };
-const EVALUATOR_TOKENS = { input: 700, output: 100 }; // one GPT evaluate call per generated field
+const SHARED_PREFIX_TOKENS = 4000; // system prompt + the page's facts: written to the cache once, then read by every field
+const NARRATIVE_FIELD_TOKENS = { input: 110, output: 500 };
+const SEO_FIELD_TOKENS = { input: 180, output: 130 }; // 3 short versions per call
+const EVALUATOR_TOKENS = { input: 750, cacheRead: 1700, output: 180 };
 
 aiRouter.get('/pricing-estimate', asyncRoute(async (req, res) => {
   const { pageType } = req.query;
@@ -105,16 +110,16 @@ aiRouter.get('/pricing-estimate', asyncRoute(async (req, res) => {
     const err = new Error('Unknown or missing pageType'); err.status = 400; throw err;
   }
 
-  const cheapGenerateCost = counts.cheap * computeCostUsd({
-    model: config.anthropicCheapModel, inputTokens: CHEAP_FIELD_TOKENS.input, outputTokens: CHEAP_FIELD_TOKENS.output
+  const writerModel = config.anthropicModel;
+  const cacheWarmupCost = computeCostUsd({ model: writerModel, cacheWriteTokens: SHARED_PREFIX_TOKENS });
+  const fieldCost = (tokens) => computeCostUsd({
+    model: writerModel, inputTokens: tokens.input, outputTokens: tokens.output, cacheReadTokens: SHARED_PREFIX_TOKENS
   });
-  const normalGenerateCost = counts.normal * computeCostUsd({
-    model: config.anthropicModel, inputTokens: NORMAL_FIELD_TOKENS.input, outputTokens: NORMAL_FIELD_TOKENS.output
-  });
-  const evaluateCost = (counts.cheap + counts.normal) * computeCostUsd({
-    model: config.openaiModel, inputTokens: EVALUATOR_TOKENS.input, outputTokens: EVALUATOR_TOKENS.output
+  const generateCost = counts.narrative * fieldCost(NARRATIVE_FIELD_TOKENS) + counts.seo * fieldCost(SEO_FIELD_TOKENS);
+  const evaluateCost = counts.narrative * computeCostUsd({
+    model: config.openaiModel, inputTokens: EVALUATOR_TOKENS.input, outputTokens: EVALUATOR_TOKENS.output, cacheReadTokens: EVALUATOR_TOKENS.cacheRead
   });
 
-  const estimatedUsd = cheapGenerateCost + normalGenerateCost + evaluateCost;
+  const estimatedUsd = cacheWarmupCost + generateCost + evaluateCost;
   res.json({ estimatedUsd, estimatedInr: usdToInr(estimatedUsd) });
 }));

@@ -171,7 +171,17 @@ export const AiFieldToolbar = ({ pageType, draftId, fieldKey, fieldLabel, fieldI
 
       {status === 'reviewing' && (
         <div className="flex items-center gap-3 flex-wrap">
-          {evaluation?.overall != null && (
+          {/* SEO title/meta are checked by rules (length, names the page) rather than scored -
+              see server/ai/seoChecks.js. */}
+          {evaluation?.method === 'rules' && (
+            <span
+              className={`text-[10px] font-bold px-2 py-0.5 rounded-full text-white ${evaluation.passed ? 'bg-navy' : 'bg-danger'}`}
+              title={evaluation.feedback || ''}
+            >
+              {evaluation.passed ? 'SEO checks passed' : 'SEO checks: needs a fix'}
+            </span>
+          )}
+          {evaluation?.method !== 'rules' && evaluation?.overall != null && (
             <span
               className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-navy text-white"
               title={evaluation.feedback || ''}

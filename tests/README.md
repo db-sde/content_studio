@@ -30,6 +30,7 @@ CI (`.github/workflows/ci.yml`) runs all of this on every push to `main` and eve
 | File | Protects |
 |---|---|
 | `api.workflow.test.js` | Who may edit, send, delete and assign; the review chain; authorship; duplicate detection; which notifications go to whom |
+| `ai.pipeline.test.js` | The cost shape of AI generation, through the real routes with fake Claude/GPT clients: one prompt-cache warm-up per page, every field reading the same cached prefix (nothing per-field inside it), no GPT call for the SEO title/meta, at most 2 writes + 2 evaluations per field, empty or cut-off drafts rewritten once and never saved blank, and cached tokens priced correctly in every cost total |
 | `api.usage.test.js` | Database-transfer budgets for polled endpoints (query count and bytes); caches never go stale; no-op saves don't write; cost totals stay a few rows |
 | `limits.test.js` | Each limit really blocks: daily AI budget, image generations per hour, requests per user, failed sign-ins, outbound timeouts |
 | `static-guards.test.js` | Scans the code. Fails if a new AI route skips the budget or rate limit, a paid image route skips the limiter, a route group skips the request limiter, a new `setInterval` bypasses the idle-aware poller, an outbound `fetch` has no timeout, the pool loses its statement timeout, or the image service starts requesting more than 1 image per call |
@@ -38,9 +39,33 @@ CI (`.github/workflows/ci.yml`) runs all of this on every push to `main` and eve
 | `config.test.js` | Limits fall back to safe defaults when an env var is missing or mistyped |
 | `image_pipeline/tests/` | Images per page type (university 0, blog 4, others 1); exactly 1 image per FLUX call on the dev model with a timeout; retry ceiling; stored file ≤ 100 KB; overlay text correctness |
 
+## What an AI page costs, and why
+
+A page's fields are written by Claude Sonnet 5 and the narrative ones scored by GPT-4o. Most of each
+call is the same for every field on the page: the style profile and the page's facts. So:
+
+- **Prompt caching.** That shared part is sent as a cached prefix (`anthropicProvider.complete`),
+  billed at a tenth of the input price after the first call. One warm-up call (`max_tokens: 0`)
+  writes it before the fields start in parallel. Anything per-field goes after it, and nothing
+  that changes per request may go inside it, or every call pays full price again with no error.
+  The GPT prompt puts the facts first for the same reason: OpenAI caches long shared prefixes at
+  half price automatically.
+- **SEO title and meta description** are checked by rules (`server/ai/seoChecks.js`): length,
+  names the page, one clean line. They don't go to GPT. The writer gives 3 versions and the
+  longest that passes is used.
+- **Thinking.** Sonnet 5 thinks before writing, billed as output, and how long varies a lot from
+  call to call. A draft that comes back empty or cut off is rewritten once, then the field is
+  reported as failed. It is never saved blank or half-finished.
+
+Measured on real pages (Oct 2026): about ₹5 of Claude per specialization page, down from ₹8-9.
+GPT was out of credits during the check, so its saving is estimated (about ₹4, down from ₹7.5-8.7).
+`input_tokens` in the logs is the uncached part only; `cache_read_tokens`/`cache_write_tokens`
+hold the rest.
+
 Each guard was checked by breaking the code on purpose (removing the budget check, the image
-limiter, a timeout or the list cache, adding a stray poll, requesting 2 images per call) and
-confirming the right test failed.
+limiter, a timeout or the list cache, adding a stray poll, requesting 2 images per call, removing
+the cache warm-up or a cache breakpoint, putting the field name in the cached prefix, sending SEO
+fields to GPT, saving cut-off text) and confirming the right test failed.
 
 ## Limits (server environment variables)
 

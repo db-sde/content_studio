@@ -1,12 +1,12 @@
 import { getDb } from '../db/index.js';
 
-export async function insertEvaluationLog({ generationLogId, model, scoresJson, feedback, overallScore, status, inputTokens, outputTokens }) {
+export async function insertEvaluationLog({ generationLogId, model, scoresJson, feedback, overallScore, status, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }) {
   const db = await getDb();
   const { rows } = await db.query(`
-    INSERT INTO evaluation_logs (generation_log_id, model, scores_json, feedback, overall_score, status, input_tokens, output_tokens)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    INSERT INTO evaluation_logs (generation_log_id, model, scores_json, feedback, overall_score, status, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
     RETURNING id
-  `, [generationLogId, model, scoresJson, feedback || null, overallScore, status, inputTokens ?? null, outputTokens ?? null]);
+  `, [generationLogId, model, scoresJson, feedback || null, overallScore, status, inputTokens ?? null, outputTokens ?? null, cacheReadTokens ?? null, cacheWriteTokens ?? null]);
   return rows[0].id;
 }
 
@@ -29,7 +29,9 @@ export async function getEvaluationUsageTotals() {
   const { rows } = await db.query(`
     SELECT model, COUNT(*)::int AS calls,
            COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens,
-           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens
+           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::float8 AS cache_read_tokens,
+           COALESCE(SUM(cache_write_tokens), 0)::float8 AS cache_write_tokens
     FROM evaluation_logs GROUP BY model
   `);
   return rows;
@@ -40,7 +42,9 @@ export async function getEvaluationUsageForDraft(draftId) {
   const { rows } = await db.query(`
     SELECT evaluation_logs.model, COUNT(*)::int AS calls,
            COALESCE(SUM(evaluation_logs.input_tokens), 0)::float8 AS input_tokens,
-           COALESCE(SUM(evaluation_logs.output_tokens), 0)::float8 AS output_tokens
+           COALESCE(SUM(evaluation_logs.output_tokens), 0)::float8 AS output_tokens,
+           COALESCE(SUM(evaluation_logs.cache_read_tokens), 0)::float8 AS cache_read_tokens,
+           COALESCE(SUM(evaluation_logs.cache_write_tokens), 0)::float8 AS cache_write_tokens
     FROM evaluation_logs
     JOIN generation_logs ON generation_logs.id = evaluation_logs.generation_log_id
     WHERE generation_logs.draft_id = $1

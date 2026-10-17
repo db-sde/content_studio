@@ -35,9 +35,8 @@ const OPENAI_JSON_SCHEMA = {
 };
 
 async function requestEvaluation(params, { forceJsonReminder = false } = {}) {
-  const system = buildEditorSystemPrompt(params.styleProfile) +
-    (forceJsonReminder ? '\n\nYour previous response was not valid JSON matching the schema. Return ONLY the JSON object, no other text.' : '');
-  const prompt = buildEditorUserPrompt(params);
+  const system = buildEditorSystemPrompt(params.styleProfile);
+  const prompt = buildEditorUserPrompt({ ...params, jsonReminder: forceJsonReminder });
 
   return openaiProvider.complete({
     system,
@@ -59,20 +58,20 @@ async function requestEvaluation(params, { forceJsonReminder = false } = {}) {
 export async function evaluateField(params) {
   // Accumulates across both attempts — the retry still costs real tokens even though it doesn't
   // count against the orchestrator's "max 2 evaluate calls" semantic budget (see comment above).
-  const totalUsage = { inputTokens: 0, outputTokens: 0 };
+  const totalUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const addUsage = (usage) => {
     if (!usage) return;
-    totalUsage.inputTokens += usage.inputTokens || 0;
-    totalUsage.outputTokens += usage.outputTokens || 0;
+    for (const key of Object.keys(totalUsage)) totalUsage[key] += usage[key] || 0;
   };
 
+  let lastError = null;
   try {
     const { text, usage } = await requestEvaluation(params);
     addUsage(usage);
     const parsed = JSON.parse(text);
     if (validate(parsed)) return { ...parsed, status: 'ok', usage: totalUsage };
-  } catch {
-    // fall through to retry
+  } catch (e) {
+    lastError = e; // fall through to retry
   }
 
   try {
@@ -80,9 +79,12 @@ export async function evaluateField(params) {
     addUsage(usage);
     const retried = JSON.parse(text);
     if (validate(retried)) return { ...retried, status: 'ok', usage: totalUsage };
-  } catch {
-    // fall through to errored
+  } catch (e) {
+    lastError = e; // fall through to errored
   }
 
+  // Logged so an outage is visible in the host's logs: the OpenAI balance once ran out and every
+  // field went unscored for days with nothing saying so.
+  console.error(`[editor] GPT evaluation unavailable for "${params.fieldLabel}" - content returned unscored:`, lastError?.message || 'invalid JSON twice');
   return { scores: null, overall: 0, feedback: '', status: 'errored', usage: totalUsage };
 }

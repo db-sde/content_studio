@@ -50,11 +50,30 @@ test('every authenticated route group goes through the per-user request limiter'
 test('the per-field AI pipeline is hard-capped at 2 generate + 2 evaluate calls', () => {
   const src = read('server/ai/orchestrator.js');
   assert.equal((src.match(/writer\.generateField\(/g) || []).length, 2, 'orchestrator.js must call the writer at most twice per field');
-  assert.equal((src.match(/editor\.evaluateField\(/g) || []).length, 2, 'orchestrator.js must call the evaluator at most twice per field');
+  // Every evaluation goes through evaluateAttempt (GPT editor, or free rules for SEO fields).
+  assert.equal((src.match(/await evaluateAttempt\(/g) || []).length, 2, 'orchestrator.js must evaluate at most twice per field');
+  assert.equal((src.match(/editor\.evaluateField\(/g) || []).length, 1, 'the GPT editor is only reached through evaluateAttempt');
   assert.ok(!/\b(while|for)\s*\(/.test(src), 'no loops around model calls in the orchestrator');
   const batch = read('server/ai/batchGenerate.js');
   const concurrency = Number(batch.match(/const CONCURRENCY = (\d+)/)[1]);
   assert.ok(concurrency <= 3, `batch concurrency ${concurrency}`);
+  // One prompt-cache warm-up per batch, outside the per-field pool.
+  assert.equal((batch.match(/warmPageCache\(/g) || []).length, 1);
+  assert.equal((batch.match(/await warmPromptCache\(/g) || []).length, 1);
+  assert.ok(batch.indexOf('await warmPromptCache(') < batch.indexOf('runWithConcurrencyLimit(toGenerate'), 'the warm-up must run before the fields start');
+});
+
+test('prompt caching stays in place: per-field text is outside the cached prefix', () => {
+  const provider = read('server/ai/providers/anthropicProvider.js');
+  assert.equal((provider.match(/cache_control: CACHE_BREAKPOINT/g) || []).length, 2, 'system prompt and facts are the two cache breakpoints');
+  assert.doesNotMatch(provider, /ttl:/, '1-hour cache writes cost 2x; a batch finishes well inside the default 5 minutes');
+  const writer = read('server/ai/writer.js');
+  assert.match(writer, /cachedPrefix = buildWriterFactsBlock\(facts\)/);
+  assert.doesNotMatch(writer, /anthropicCheapModel|CHEAP_MODEL/, 'a second writer model would need its own cache');
+  // Nothing time- or request-dependent may enter the cached part of the prompt.
+  const prompts = read('server/ai/prompts/writerPrompts.js');
+  const cachedBuilders = prompts.slice(0, prompts.indexOf('export function buildWriterUserPrompt'));
+  assert.doesNotMatch(cachedBuilders, /Date|random|uuid|fieldLabel|fieldInstructions/i);
 });
 
 test('every model call has a timeout and a token ceiling', () => {

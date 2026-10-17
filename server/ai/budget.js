@@ -19,10 +19,12 @@ export async function getTodaysAiSpendUsd() {
   const db = await getDb();
   const since = startOfUtcDay();
   const { rows } = await db.query(`
-    SELECT model, COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens, COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens
+    SELECT model, COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens, COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::float8 AS cache_read_tokens, COALESCE(SUM(cache_write_tokens), 0)::float8 AS cache_write_tokens
     FROM generation_logs WHERE created_at >= $1 GROUP BY model
     UNION ALL
-    SELECT model, COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens, COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens
+    SELECT model, COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens, COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::float8 AS cache_read_tokens, COALESCE(SUM(cache_write_tokens), 0)::float8 AS cache_write_tokens
     FROM evaluation_logs WHERE created_at >= $1 GROUP BY model
   `, [since]);
   return computeCostUsdForUsage(rows);

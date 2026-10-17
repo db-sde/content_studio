@@ -1,12 +1,16 @@
 import { getDb } from '../db/index.js';
 
-export async function insertGenerationLog({ draftId, pageType, fieldKey, attemptNumber, model, prompt, factsJson, styleVersion, output, inputTokens, outputTokens }) {
+// Attempt number 0 is a prompt-cache warm-up (see ai/batchGenerate.js): no output, but it is billed,
+// so it is logged like any call and counted in every cost total - just not as a "generate call".
+export const CACHE_WARMUP_ATTEMPT = 0;
+
+export async function insertGenerationLog({ draftId, pageType, fieldKey, attemptNumber, model, prompt, factsJson, styleVersion, output, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens }) {
   const db = await getDb();
   const { rows } = await db.query(`
-    INSERT INTO generation_logs (draft_id, page_type, field_key, attempt_number, model, prompt, facts_json, style_version, output, input_tokens, output_tokens)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    INSERT INTO generation_logs (draft_id, page_type, field_key, attempt_number, model, prompt, facts_json, style_version, output, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     RETURNING id
-  `, [draftId, pageType, fieldKey, attemptNumber, model, prompt, factsJson, styleVersion, output, inputTokens ?? null, outputTokens ?? null]);
+  `, [draftId, pageType, fieldKey, attemptNumber, model, prompt, factsJson, styleVersion, output, inputTokens ?? null, outputTokens ?? null, cacheReadTokens ?? null, cacheWriteTokens ?? null]);
   return rows[0].id;
 }
 
@@ -26,9 +30,11 @@ export async function getGenerationLogsByDraft(draftId) {
 export async function getGenerationUsageTotals() {
   const db = await getDb();
   const { rows } = await db.query(`
-    SELECT model, COUNT(*)::int AS calls,
+    SELECT model, COUNT(*) FILTER (WHERE attempt_number <> ${CACHE_WARMUP_ATTEMPT})::int AS calls,
            COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens,
-           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens
+           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::float8 AS cache_read_tokens,
+           COALESCE(SUM(cache_write_tokens), 0)::float8 AS cache_write_tokens
     FROM generation_logs GROUP BY model
   `);
   const { rows: touched } = await db.query('SELECT COUNT(DISTINCT draft_id)::int AS n FROM generation_logs');
@@ -40,9 +46,11 @@ export async function getGenerationUsageTotals() {
 export async function getGenerationUsageForDraft(draftId) {
   const db = await getDb();
   const { rows } = await db.query(`
-    SELECT model, COUNT(*)::int AS calls,
+    SELECT model, COUNT(*) FILTER (WHERE attempt_number <> ${CACHE_WARMUP_ATTEMPT})::int AS calls,
            COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens,
-           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens
+           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens,
+           COALESCE(SUM(cache_read_tokens), 0)::float8 AS cache_read_tokens,
+           COALESCE(SUM(cache_write_tokens), 0)::float8 AS cache_write_tokens
     FROM generation_logs WHERE draft_id = $1 GROUP BY model
   `, [draftId]);
   return rows;
