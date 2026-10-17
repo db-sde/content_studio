@@ -30,6 +30,22 @@ export async function createNotification({ draftId, type, message, createdByUser
 // draft/author to render a feed item without a second round-trip per row.
 export async function listNotificationsForUser(user) {
   const db = await getDb();
+
+  // Polled by every open tab, and a person's notifications almost never change between polls - yet
+  // the full feed (up to 50 rows, with long revert notes: ~35 KB for an Intern) was re-downloaded
+  // each time. Notifications are insert-only, so "how many and the newest id" is a complete change
+  // detector; the full query only runs when that moves. The TTL exists solely for the draft labels
+  // joined into each row, which can change when someone renames a draft - without it a stale label
+  // could sit in the cache until the next new notification arrived.
+  const cacheKey = `${user.id}:${user.role}`;
+  const { rows: stamp } = await db.query(`
+    SELECT COUNT(*)::int AS n, COALESCE(MAX(id), 0)::int AS newest
+    FROM notifications WHERE recipient_user_id = $1 OR recipient_role = $2
+  `, [user.id, user.role]);
+  const fingerprint = `${stamp[0].n}:${stamp[0].newest}`;
+  const cached = feedCache.get(cacheKey);
+  if (cached && cached.fingerprint === fingerprint && Date.now() - cached.at < FEED_CACHE_TTL_MS) return cached.rows;
+
   const { rows } = await db.query(`
     SELECT
       notifications.id, notifications.draft_id, notifications.type, notifications.message,
@@ -44,8 +60,12 @@ export async function listNotificationsForUser(user) {
     ORDER BY notifications.created_at DESC
     LIMIT 50
   `, [user.id, user.role]);
+  feedCache.set(cacheKey, { fingerprint, at: Date.now(), rows });
   return rows;
 }
+
+const FEED_CACHE_TTL_MS = 10 * 60 * 1000;
+const feedCache = new Map();
 
 // Which draft status this notification's action was aiming for — used below to tell whether the
 // recipient has since acted on it ("fixed"/actioned) or it's still sitting untouched. Comparing

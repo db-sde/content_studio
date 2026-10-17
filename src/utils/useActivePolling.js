@@ -6,6 +6,12 @@ import { useEffect, useRef } from 'react';
 // looking (see useActivePolling).
 export const POLL_INTERVAL_MS = 30 * 1000;
 
+// The Saved Drafts list is the heaviest thing polled (it carries every draft and grows with each
+// one) and it legitimately changes whenever anyone is typing - every autosave bumps a draft's
+// "Last Edited" - so the server's "nothing changed" shortcut helps less here than for notifications.
+// A minute is plenty for a table of statuses; notifications, which drive the pop-ups, stay at 30s.
+export const LIST_POLL_INTERVAL_MS = 60 * 1000;
+
 // Counts and sums that only matter on one screen change slowly - no reason to fetch them every poll.
 export const SLOW_POLL_INTERVAL_MS = 5 * 60 * 1000;
 

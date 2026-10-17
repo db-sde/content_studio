@@ -34,7 +34,7 @@ import { ActivityPanel } from './screens/ActivityPanel';
 import { syncFieldRecord, getPricingEstimate, getGlobalCostSummary } from './services/aiClient';
 import { listDirectoryEntries } from './services/directoryClient';
 import { NOTIFICATION_TYPE_VERBS } from './utils/notificationFormat';
-import { useActivePolling, POLL_INTERVAL_MS, SLOW_POLL_INTERVAL_MS } from './utils/useActivePolling';
+import { useActivePolling, POLL_INTERVAL_MS, LIST_POLL_INTERVAL_MS, SLOW_POLL_INTERVAL_MS } from './utils/useActivePolling';
 import * as draftsClient from './services/draftsClient';
 import * as notificationsClient from './services/notificationsClient';
 import { canEditField, getLockReason } from './utils/permissions';
@@ -437,11 +437,11 @@ function ContentStudioApp() {
   // notes) without this app telling them - so the home-screen list and the notification feed are
   // polled rather than only refreshed after the current user's own actions. Each poll is a real
   // (billed) database round trip, so useActivePolling only runs while the tab is visible and the
-  // person is actually around, every 30s - not around the clock from every forgotten open tab.
-  useActivePolling(() => {
-    refreshDraftsList();
-    refreshNotifications();
-  }, POLL_INTERVAL_MS);
+  // person is actually around - not around the clock from every forgotten open tab.
+  // Notifications drive the pop-ups and are nearly free (the server answers "nothing new" with a
+  // tiny query), so they stay at 30s; the drafts list is the heavy one, so it polls every minute.
+  useActivePolling(refreshNotifications, POLL_INTERVAL_MS);
+  useActivePolling(refreshDraftsList, LIST_POLL_INTERVAL_MS);
 
   // The all-time AI cost total only shows on the home screen and moves slowly - far slower than the
   // list above, so it gets its own, much lazier poll.

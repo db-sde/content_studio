@@ -54,6 +54,14 @@ const norm = (col) => `btrim(regexp_replace(regexp_replace(lower(coalesce(${col}
 //     anything, and shouldn't make every other unnamed draft look like one.
 export async function listDrafts() {
   const db = await getDb();
+
+  // Every open tab polls this, and nearly every poll finds nothing changed - yet the full result
+  // (all drafts, ~600 bytes each, growing with every draft anyone creates) used to cross the wire
+  // from the database each time. Ask a tiny question first - "has any draft or user row changed?" -
+  // and only re-run the real query when the answer is yes.
+  const fingerprint = await listFingerprint(db);
+  if (listCache.rows && listCache.fingerprint === fingerprint) return listCache.rows;
+
   const { rows } = await db.query(`
     WITH base AS (
       SELECT
@@ -100,7 +108,30 @@ export async function listDrafts() {
     LEFT JOIN users submitter ON submitter.id = keyed.submitted_by_user_id
     ORDER BY (keyed.prioritized_at IS NULL) ASC, keyed.prioritized_at DESC, keyed.updated_at DESC
   `);
+  // Stored under the fingerprint taken BEFORE the query ran: if something changed in between, the
+  // next poll sees a different fingerprint and refreshes - the cache can lag by one poll at worst,
+  // never serve a permanently stale list.
+  listCache = { fingerprint, rows };
   return rows;
+}
+
+let listCache = { fingerprint: null, rows: null };
+
+// One 'version stamp' for everything listDrafts' output depends on: the drafts rows (statuses,
+// owners, titles, duplicate ranks all derive from them) and the users' names (joined in).
+// For drafts, xmin is Postgres' own per-row version: it changes on every INSERT/UPDATE, and a DELETE
+// removes the row from the hash - so this can't miss an edit, including two edits inside the same
+// second (which a timestamp-based check would). Users are hashed by (id, name) rather than xmin
+// because their rows also change for unrelated reasons (opening the notifications bell updates
+// notifications_last_read_at) that don't affect this list. Result is two short hashes, however many
+// drafts exist.
+async function listFingerprint(db) {
+  const { rows } = await db.query(`
+    SELECT
+      (SELECT md5(string_agg(id || ':' || xmin::text, ',' ORDER BY id)) FROM drafts) AS drafts_fp,
+      (SELECT md5(string_agg(id::text || ':' || name, ',' ORDER BY id)) FROM users) AS users_fp
+  `);
+  return `${rows[0].drafts_fp}|${rows[0].users_fp}`;
 }
 
 // Set when an Admin sends a draft back to the Senior or Intern; cleared the moment its recipient
