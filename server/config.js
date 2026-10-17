@@ -45,10 +45,12 @@ export const config = {
     siteUrl: (process.env.WORDPRESS_SITE_URL || '').replace(/\/+$/, ''),
     appUser: process.env.WORDPRESS_APP_USER || '',
     appPassword: process.env.WORDPRESS_APP_PASSWORD || '',
+    // REST bases of the site's custom post types (wp-json/wp/v2/<slug>). The defaults are the
+    // DegreeBaba site's own, as listed by its wp-json/wp/v2/types.
     postTypeSlugs: {
-      university: process.env.WORDPRESS_POST_TYPE_UNIVERSITY || 'universities',
-      course: process.env.WORDPRESS_POST_TYPE_COURSE || 'courses',
-      specialization: process.env.WORDPRESS_POST_TYPE_SPECIALIZATION || 'specializations'
+      university: process.env.WORDPRESS_POST_TYPE_UNIVERSITY || 'university',
+      course: process.env.WORDPRESS_POST_TYPE_COURSE || 'course',
+      specialization: process.env.WORDPRESS_POST_TYPE_SPECIALIZATION || 'specialization'
     }
   },
 
@@ -89,17 +91,20 @@ export const config = {
   }
 };
 
+// These errors reach people using the live app, where the fix is the hosting dashboard, not a file.
+const WHERE_TO_SET_ENV = 'On the live app, add it under the server\'s Environment settings on Render and redeploy; when running locally, put it in content_studio/.env (see .env.example).';
+
 // Called at the point an AI provider is actually invoked (not at server boot) so the rest of
 // the backend — DB, health check, non-AI routes — stays usable even before keys are configured.
 export function assertAnthropicConfigured() {
   if (!config.anthropicApiKey) {
-    throw new Error('ANTHROPIC_API_KEY is not set. Add it to content_studio/.env (see .env.example).');
+    throw new Error(`ANTHROPIC_API_KEY is not set. ${WHERE_TO_SET_ENV}`);
   }
 }
 
 export function assertOpenAiConfigured() {
   if (!config.openaiApiKey) {
-    throw new Error('OPENAI_API_KEY is not set. Add it to content_studio/.env (see .env.example).');
+    throw new Error(`OPENAI_API_KEY is not set. ${WHERE_TO_SET_ENV}`);
   }
 }
 
@@ -107,7 +112,7 @@ export function assertWordpressConfigured() {
   const missing = ['siteUrl', 'appUser', 'appPassword'].filter(key => !config.wordpress[key]);
   if (missing.length) {
     const envNames = { siteUrl: 'WORDPRESS_SITE_URL', appUser: 'WORDPRESS_APP_USER', appPassword: 'WORDPRESS_APP_PASSWORD' };
-    throw new Error(`WordPress is not configured. Missing: ${missing.map(k => envNames[k]).join(', ')}. Add these to content_studio/.env (see .env.example).`);
+    throw new Error(`WordPress is not configured. Missing: ${missing.map(k => envNames[k]).join(', ')}. ${WHERE_TO_SET_ENV}`);
   }
 }
 

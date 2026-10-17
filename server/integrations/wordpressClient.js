@@ -15,6 +15,29 @@ function postTypeSlug(pageType) {
   return slug;
 }
 
+// WordPress's own messages ("You are not currently logged in.") don't say what to fix, and the
+// fix is almost never in this app - so name the actual cause and where it gets fixed.
+export function explainWordPressError(status, body, slug) {
+  const code = body?.code;
+  if (code === 'rest_not_logged_in' || (status === 401 && !code)) {
+    return 'WordPress did not receive the login. The WordPress server is dropping the "Authorization" header before ' +
+      'it reaches WordPress (common on Apache/LiteSpeed hosting). Whoever hosts the site needs to pass it through, e.g. add ' +
+      '"SetEnvIf Authorization (.*) HTTP_AUTHORIZATION=$1" to its .htaccess. Nothing was published.';
+  }
+  if (code === 'invalid_username' || code === 'incorrect_password' || code === 'application_passwords_disabled') {
+    return `WordPress refused the login (${code}). Check WORDPRESS_APP_USER and WORDPRESS_APP_PASSWORD on the server - ` +
+      'the password must be an Application Password from WP Admin > Users > Profile, not the normal login password. Nothing was published.';
+  }
+  if (code === 'rest_cannot_create' || code === 'rest_cannot_edit' || status === 403) {
+    return `The WordPress user in WORDPRESS_APP_USER isn't allowed to publish this page type (${code || status}). Give it an Editor or Administrator role. Nothing was published.`;
+  }
+  if (code === 'rest_no_route' || (status === 404 && !code)) {
+    return `WordPress has no "${slug}" post type in its REST API. Set the WORDPRESS_POST_TYPE_* variables to the site's own names ` +
+      '(listed under "rest_base" at <site>/wp-json/wp/v2/types). Nothing was published.';
+  }
+  return body?.message || `WordPress REST API request failed (${status})`;
+}
+
 // ACF fields ride under the "acf" key on the standard post-object response/request shape — this
 // is WordPress's own convention once a field group has "Show in REST API" enabled, not something
 // specific to this app. `existingPostId` makes this an update (PUT) instead of a new post (POST),
@@ -53,10 +76,7 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
 
   const body = await res.json().catch(() => null);
 
-  if (!res.ok) {
-    const message = body?.message || `WordPress REST API request failed (${res.status})`;
-    throw new Error(message);
-  }
+  if (!res.ok) throw new Error(explainWordPressError(res.status, body, slug));
 
   return { id: body.id, link: body.link, status: body.status };
 }
