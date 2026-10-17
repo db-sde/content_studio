@@ -1,9 +1,13 @@
 import { config } from '../config.js';
 
-// Reference USD rates, $ per 1M tokens — approximate, drifts with the market; update alongside
-// config.usdToInrRate rather than treating these as exact.
+// Reference USD rates, $ per 1M tokens — update alongside config.usdToInrRate when providers change
+// prices. Claude rates checked against platform.claude.com/docs/en/about-claude/pricing on
+// 2026-10-17: Sonnet 5's $2/$10 launch price became its standard price (the planned rise to $3/$15
+// on 2026-09-01 was cancelled) - this table had still been charging every Sonnet call at $3/$15,
+// overstating the cost shown in the app (and counted against the daily AI budget) by 50%.
 const RATES = {
-  'claude-sonnet-5': { inputPerMillion: 3.00, outputPerMillion: 15.00 },
+  'claude-sonnet-5': { inputPerMillion: 2.00, outputPerMillion: 10.00 },
+  'claude-sonnet-5-5': { inputPerMillion: 2.00, outputPerMillion: 10.00 },
   'claude-haiku-4-5': { inputPerMillion: 1.00, outputPerMillion: 5.00 },
   'gpt-4o': { inputPerMillion: 2.50, outputPerMillion: 10.00 },
   'gpt-4o-mini': { inputPerMillion: 0.15, outputPerMillion: 0.60 }

@@ -9,6 +9,7 @@ import { __resetRateLimitsForTests } from '../server/middleware/rateLimit.js';
 import { __resetLoginThrottleForTests } from '../server/routes/auth.js';
 import { hashPassword } from '../server/utils/passwords.js';
 import { startOfUtcDay } from '../server/ai/budget.js';
+import { computeCostUsd } from '../server/ai/pricing.js';
 
 let t, stub, A, S1, S2, filled;
 
@@ -33,8 +34,9 @@ async function draftIn(status) {
   return id;
 }
 async function logAiSpend({ usd, at }) {
-  // claude-sonnet-5 output is $15 / 1M tokens
-  const outputTokens = Math.ceil((usd / 15) * 1_000_000);
+  // Derived from the live pricing table so this keeps meaning "$usd worth" if rates change.
+  const perMillionOutput = computeCostUsd({ model: 'claude-sonnet-5', inputTokens: 0, outputTokens: 1_000_000 });
+  const outputTokens = Math.ceil((usd / perMillionOutput) * 1_000_000);
   await t.query(
     "INSERT INTO generation_logs (draft_id,page_type,field_key,attempt_number,model,prompt,facts_json,style_version,output,input_tokens,output_tokens,created_at) VALUES ('x','course','f',1,'claude-sonnet-5','p','{}','v1','o',0,$1,$2)",
     [outputTokens, at]
