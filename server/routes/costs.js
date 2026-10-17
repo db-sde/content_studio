@@ -1,8 +1,8 @@
 import { Router } from 'express';
 import { asyncRoute } from '../middleware/errorHandler.js';
-import { getAllGenerationLogs } from '../repositories/generationLogsRepo.js';
-import { getAllEvaluationLogs } from '../repositories/evaluationLogsRepo.js';
-import { computeCostUsd, usdToInr } from '../ai/pricing.js';
+import { getGenerationUsageTotals } from '../repositories/generationLogsRepo.js';
+import { getEvaluationUsageTotals } from '../repositories/evaluationLogsRepo.js';
+import { computeCostUsdForUsage, usdToInr } from '../ai/pricing.js';
 
 export const costsRouter = Router();
 
@@ -10,20 +10,18 @@ export const costsRouter = Router();
 // GET /api/drafts/:id/cost-summary. Both roles can see this; there's nothing sensitive in a
 // token-cost aggregate.
 costsRouter.get('/summary', asyncRoute(async (req, res) => {
-  const generationLogs = await getAllGenerationLogs();
-  const evaluationLogs = await getAllEvaluationLogs();
+  // Summed in the database (one row per model) rather than downloading every log row - see
+  // getGenerationUsageTotals. Same numbers, a few rows instead of thousands.
+  const { byModel: generation, draftsTouched } = await getGenerationUsageTotals();
+  const evaluation = await getEvaluationUsageTotals();
 
-  const totalUsd = [...generationLogs, ...evaluationLogs].reduce((sum, row) => (
-    sum + computeCostUsd({ model: row.model, inputTokens: row.input_tokens, outputTokens: row.output_tokens })
-  ), 0);
-
-  const draftIds = new Set(generationLogs.map(row => row.draft_id));
+  const totalUsd = computeCostUsdForUsage([...generation, ...evaluation]);
 
   res.json({
     totalUsd,
     totalInr: usdToInr(totalUsd),
-    generateCalls: generationLogs.length,
-    evaluateCalls: evaluationLogs.length,
-    draftsTouched: draftIds.size
+    generateCalls: generation.reduce((n, r) => n + r.calls, 0),
+    evaluateCalls: evaluation.reduce((n, r) => n + r.calls, 0),
+    draftsTouched
   });
 }));

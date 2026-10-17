@@ -10,6 +10,17 @@ export async function createDraft({ id, pageType, formData, createdByUserId }) {
   return getDraftById(id);
 }
 
+// Just the fields the open-draft poll compares - no form_data_json. A draft's full contents are
+// tens of KB, and the open-draft check used to download all of it every few seconds only to look at
+// one short status string; now it asks this, and only fetches the full draft when status changed.
+export async function getDraftStatusInfo(id) {
+  const db = await getDb();
+  const { rows } = await db.query(`
+    SELECT id, status, prioritized_at, allow_intern_ai_edit, wordpress_url, updated_at FROM drafts WHERE id = $1
+  `, [id]);
+  return rows[0] || null;
+}
+
 export async function getDraftById(id) {
   const db = await getDb();
   const { rows } = await db.query('SELECT * FROM drafts WHERE id = $1', [id]);

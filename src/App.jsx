@@ -34,6 +34,7 @@ import { ActivityPanel } from './screens/ActivityPanel';
 import { syncFieldRecord, getPricingEstimate, getGlobalCostSummary } from './services/aiClient';
 import { listDirectoryEntries } from './services/directoryClient';
 import { NOTIFICATION_TYPE_VERBS } from './utils/notificationFormat';
+import { useActivePolling, POLL_INTERVAL_MS, SLOW_POLL_INTERVAL_MS } from './utils/useActivePolling';
 import * as draftsClient from './services/draftsClient';
 import * as notificationsClient from './services/notificationsClient';
 import { canEditField, getLockReason } from './utils/permissions';
@@ -334,6 +335,14 @@ function ContentStudioApp() {
   useEffect(() => {
     formDataRef.current = formData;
   });
+  // Same pattern for the autosave timer's closure (see saveDraftToStorage): whether this user may
+  // edit the open draft, and the last content that was successfully saved, so a timer tick with
+  // nothing new to save - or from a view-only reader - can skip the network call entirely.
+  const isDraftOwnerRef = useRef(isDraftOwner);
+  useEffect(() => {
+    isDraftOwnerRef.current = isDraftOwner;
+  });
+  const lastSavedSnapshotRef = useRef(null);
 
   // Mirrors activePageType so refreshDraftsList (below) can be a stable useCallback with no
   // dependencies — it only needs the *current* value to decide whether to surface the "continue
@@ -425,20 +434,18 @@ function ContentStudioApp() {
   }, [currentUser?.role, currentUser?.id]);
 
   // Neither role can otherwise tell the other has acted (new draft submitted, sent back with
-  // notes, cost accrued) without this app telling them — so the home-screen list, the
-  // notification feed, and the global cost figure are polled continuously rather than only
-  // refreshed after the current user's own actions. 12s is frequent enough to feel live without
-  // hammering the server; these are three cheap GETs, not anything AI-cost-incurring.
-  useEffect(() => {
-    const poll = () => {
-      refreshDraftsList();
-      refreshNotifications();
-      refreshGlobalCostSummary();
-    };
-    poll();
-    const interval = setInterval(poll, 12000);
-    return () => clearInterval(interval);
-  }, [refreshDraftsList, refreshNotifications, refreshGlobalCostSummary]);
+  // notes) without this app telling them - so the home-screen list and the notification feed are
+  // polled rather than only refreshed after the current user's own actions. Each poll is a real
+  // (billed) database round trip, so useActivePolling only runs while the tab is visible and the
+  // person is actually around, every 30s - not around the clock from every forgotten open tab.
+  useActivePolling(() => {
+    refreshDraftsList();
+    refreshNotifications();
+  }, POLL_INTERVAL_MS);
+
+  // The all-time AI cost total only shows on the home screen and moves slowly - far slower than the
+  // list above, so it gets its own, much lazier poll.
+  useActivePolling(refreshGlobalCostSummary, SLOW_POLL_INTERVAL_MS);
 
   // Mirrors draftStatus for the open-draft poll below, same reasoning as formDataRef — without
   // it, the interval (set up once per activeDraftId) would forever compare against whatever
@@ -453,32 +460,40 @@ function ContentStudioApp() {
   // while a Senior peeked at it. Deliberately only reacts to an actual status change rather than
   // merging in form_data on every tick: this browser's own in-flight edits (not yet autosaved)
   // must never be silently overwritten by a same-status poll.
-  useEffect(() => {
-    if (!activeDraftId) return;
-    const interval = setInterval(async () => {
+  // Asks the server only for the draft's short status record (not its multi-KB contents) and
+  // fetches the full draft only when the status has actually changed. If the status endpoint isn't
+  // there (a backend deploy that hasn't caught up with this frontend yet), falls back to the old
+  // full-draft check rather than silently losing the "someone moved this draft" detection.
+  useActivePolling(async () => {
+    try {
+      let draft = null;
+      let status;
       try {
-        const { draft } = await draftsClient.getDraft(activeDraftId);
-        if (draft.status !== draftStatusRef.current) {
-          dispatch({
-            type: ACTIONS.LOAD_DRAFT,
-            payload: {
-              pageType: draft.page_type,
-              draftId: draft.id,
-              state: draft.form_data,
-              status: draft.status,
-              allowInternAiEdit: !!draft.allow_intern_ai_edit,
-              prioritizedAt: draft.prioritized_at,
-              wordpressUrl: draft.wordpress_url
-            }
-          });
-          draftsClient.getCostSummary(draft.id).then(setCostSummary).catch(() => {});
-        }
-      } catch (e) {
-        console.error('Error polling draft for remote changes', e);
+        ({ status } = await draftsClient.getDraftStatus(activeDraftId));
+      } catch {
+        ({ draft } = await draftsClient.getDraft(activeDraftId));
+        status = draft.status;
       }
-    }, 12000);
-    return () => clearInterval(interval);
-  }, [activeDraftId]);
+      if (status === draftStatusRef.current) return;
+
+      if (!draft) ({ draft } = await draftsClient.getDraft(activeDraftId));
+      dispatch({
+        type: ACTIONS.LOAD_DRAFT,
+        payload: {
+          pageType: draft.page_type,
+          draftId: draft.id,
+          state: draft.form_data,
+          status: draft.status,
+          allowInternAiEdit: !!draft.allow_intern_ai_edit,
+          prioritizedAt: draft.prioritized_at,
+          wordpressUrl: draft.wordpress_url
+        }
+      });
+      draftsClient.getCostSummary(draft.id).then(setCostSummary).catch(() => {});
+    } catch (e) {
+      console.error('Error polling draft for remote changes', e);
+    }
+  }, POLL_INTERVAL_MS, { enabled: !!activeDraftId, immediate: false });
 
   const unreadNotificationCount = notifications.filter(n => !notificationsLastReadAt || n.created_at > notificationsLastReadAt).length;
 
@@ -674,6 +689,8 @@ function ContentStudioApp() {
   // Set up 30-second Auto-save
   useEffect(() => {
     if (activePageType && activeDraftId) {
+      // A different draft just opened - nothing has been saved for it yet from this session.
+      lastSavedSnapshotRef.current = null;
       // Clear previous interval if active
       if (autoSaveIntervalRef.current) {
         clearInterval(autoSaveIntervalRef.current);
@@ -699,7 +716,16 @@ function ContentStudioApp() {
   async function saveDraftToStorage(isAuto = false) {
     if (!activePageType || !activeDraftId) return;
 
+    // The 30s autosave used to rewrite the whole draft on every tick whether or not anything had
+    // been typed - and for a view-only reader, whose edits the server discards anyway. Each of those
+    // is a billed database write plus a full-draft response. Skip when there's nothing new to save.
+    if (isAuto) {
+      if (!isDraftOwnerRef.current) return;
+      if (JSON.stringify(formDataRef.current) === lastSavedSnapshotRef.current) return;
+    }
+
     setSaveIndicator('saving');
+    const snapshot = JSON.stringify(formDataRef.current);
 
     try {
       // Reads through the ref rather than the closed-over formData — the autosave interval below
@@ -710,9 +736,12 @@ function ContentStudioApp() {
       // Should be empty in normal use (locked inputs are disabled client-side) — if the server
       // ever silently drops a locked field's change, it's worth knowing about during development.
       if (skippedKeys?.length) console.warn('[saveDraftToStorage] server skipped locked field(s):', skippedKeys);
+      lastSavedSnapshotRef.current = snapshot;
       setLastSavedTime(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
       setSaveIndicator('saved');
-      refreshDraftsList();
+      // The list refreshes itself every poll - only a manual save needs it right now (an autosave
+      // used to fire this extra full list query every 30s on top of the poll).
+      if (!isAuto) refreshDraftsList();
 
       // On a manual save (not the 30s autosave, to avoid API spam), give every AI-eligible field
       // that already has content but has never been AI-touched a permanent field_records row —

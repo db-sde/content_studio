@@ -47,6 +47,11 @@ export function getDraft(id) {
   return getJSON(`/api/drafts/${id}`);
 }
 
+// Short status record only (no form data) - what the open-draft poll compares against.
+export function getDraftStatus(id) {
+  return getJSON(`/api/drafts/${id}/status`);
+}
+
 export function createDraft(pageType) {
   return postJSON('/api/drafts', { pageType });
 }

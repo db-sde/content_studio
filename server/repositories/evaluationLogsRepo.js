@@ -22,6 +22,33 @@ export async function getEvaluationLogsByDraft(draftId) {
   return rows;
 }
 
+// Aggregated equivalents of the two row-level getters below - see getGenerationUsageTotals in
+// generationLogsRepo.js for why the cost routes want sums per model, not every row.
+export async function getEvaluationUsageTotals() {
+  const db = await getDb();
+  const { rows } = await db.query(`
+    SELECT model, COUNT(*)::int AS calls,
+           COALESCE(SUM(input_tokens), 0)::float8 AS input_tokens,
+           COALESCE(SUM(output_tokens), 0)::float8 AS output_tokens
+    FROM evaluation_logs GROUP BY model
+  `);
+  return rows;
+}
+
+export async function getEvaluationUsageForDraft(draftId) {
+  const db = await getDb();
+  const { rows } = await db.query(`
+    SELECT evaluation_logs.model, COUNT(*)::int AS calls,
+           COALESCE(SUM(evaluation_logs.input_tokens), 0)::float8 AS input_tokens,
+           COALESCE(SUM(evaluation_logs.output_tokens), 0)::float8 AS output_tokens
+    FROM evaluation_logs
+    JOIN generation_logs ON generation_logs.id = evaluation_logs.generation_log_id
+    WHERE generation_logs.draft_id = $1
+    GROUP BY evaluation_logs.model
+  `, [draftId]);
+  return rows;
+}
+
 // See getAllGenerationLogs — same "every draft, every time" scope for the home-page total, and
 // the same reason to select only the cost-relevant columns instead of `SELECT *` (full rows here
 // carry a `feedback`/`scores_json` blob per evaluation).

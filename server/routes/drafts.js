@@ -1,13 +1,13 @@
 import { Router } from 'express';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
-import { createDraft, getDraftById, getDraftOwnerId, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setDraftSubmittedBy, setDraftAssignee, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
+import { createDraft, getDraftById, getDraftStatusInfo, getDraftOwnerId, listDrafts, updateDraftFormData, updateDraftStatus, setAllowInternAiEdit, setDraftPriority, setDraftSubmittedBy, setDraftAssignee, setWordpressPublishInfo, deleteDraft } from '../repositories/draftsRepo.js';
 import { getUserById, listActiveInterns } from '../repositories/usersRepo.js';
 import { generateAllAiFields } from '../ai/batchGenerate.js';
-import { getGenerationLogsByDraft } from '../repositories/generationLogsRepo.js';
-import { getEvaluationLogsByDraft } from '../repositories/evaluationLogsRepo.js';
+import { getGenerationLogsByDraft, getGenerationUsageForDraft } from '../repositories/generationLogsRepo.js';
+import { getEvaluationLogsByDraft, getEvaluationUsageForDraft } from '../repositories/evaluationLogsRepo.js';
 import { getFieldRecordsByDraft } from '../repositories/fieldRecordsRepo.js';
-import { computeCostUsd, usdToInr } from '../ai/pricing.js';
+import { computeCostUsdForUsage, usdToInr } from '../ai/pricing.js';
 import { canEditFieldServer } from '../utils/serverPermissions.js';
 import { validateFactsOnly, validateState, transformToACF } from '../../src/config/schemas.js';
 import { createNotification } from '../repositories/notificationsRepo.js';
@@ -114,6 +114,15 @@ draftsRouter.get('/:id', asyncRoute(async (req, res) => {
   res.json({ draft: await loadDraftOr404(req.params.id) });
 }));
 
+// Cheap status check for the open-draft poll (see getDraftStatusInfo) - everything the client
+// compares, none of the draft's content.
+draftsRouter.get('/:id/status', asyncRoute(async (req, res) => {
+  if (!DRAFT_ID_RE.test(req.params.id)) throw notFound();
+  const info = await getDraftStatusInfo(req.params.id);
+  if (!info) throw notFound();
+  res.json(info);
+}));
+
 // Server-side backstop for field-level locking: the UI already disables locked inputs and the
 // JSON edit-mode already filters its bulk-apply through canEditField, but until now nothing
 // stopped a direct PUT from overwriting a locked field (e.g. an Intern editing an AI field, or
@@ -148,6 +157,15 @@ draftsRouter.put('/:id', asyncRoute(async (req, res) => {
       skippedKeys.push(key);
     }
   });
+
+  // Nothing the caller is allowed to change actually differs from what's stored - don't write. The
+  // client autosaves on a timer whether or not anything was typed, and every one of those used to
+  // rewrite the whole draft and bump its updated_at (which also made "Last Edited" lie and reshuffled
+  // the list order). Skipping the write keeps both the database quiet and the timestamp honest.
+  if (appliedChanges === 0) {
+    res.json({ draft, skippedKeys: skippedKeys.length ? skippedKeys : undefined });
+    return;
+  }
 
   // Only stamp "last edited by" when something was actually changed - autosave fires on a timer
   // regardless of edits, and a Senior merely having a draft open must not displace the Intern
@@ -473,18 +491,18 @@ draftsRouter.get('/:id/full-export', asyncRoute(async (req, res) => {
 // cheap (at most ~20 rows per draft), so no need to cache/denormalize onto the drafts row.
 draftsRouter.get('/:id/cost-summary', asyncRoute(async (req, res) => {
   const draft = await loadDraftOr404(req.params.id);
-  const generationLogs = await getGenerationLogsByDraft(draft.id);
-  const evaluationLogs = await getEvaluationLogsByDraft(draft.id);
+  // Summed per model in the database - this used to SELECT * every generation log for the draft
+  // (including each full prompt and output text) just to add up token counts.
+  const generation = await getGenerationUsageForDraft(draft.id);
+  const evaluation = await getEvaluationUsageForDraft(draft.id);
 
-  const totalUsd = [...generationLogs, ...evaluationLogs].reduce((sum, row) => (
-    sum + computeCostUsd({ model: row.model, inputTokens: row.input_tokens, outputTokens: row.output_tokens })
-  ), 0);
+  const totalUsd = computeCostUsdForUsage([...generation, ...evaluation]);
 
   res.json({
     totalUsd,
     totalInr: usdToInr(totalUsd),
-    generateCalls: generationLogs.length,
-    evaluateCalls: evaluationLogs.length
+    generateCalls: generation.reduce((n, r) => n + r.calls, 0),
+    evaluateCalls: evaluation.reduce((n, r) => n + r.calls, 0)
   });
 }));
 
