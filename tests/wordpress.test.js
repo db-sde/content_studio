@@ -51,9 +51,9 @@ test('a successful publish sends the title, ACF fields and Basic auth to the pos
 
 test('each WordPress failure names its real cause', async () => {
   const cases = [
-    [[401, { code: 'rest_not_logged_in', message: 'You are not currently logged in.' }], /dropping the "Authorization" header/],
+    [[401, { code: 'rest_not_logged_in', message: 'You are not currently logged in.' }], /did not accept the login. Most often WORDPRESS_APP_USER \/ WORDPRESS_APP_PASSWORD/],
     [[401, { code: 'incorrect_password', message: 'The provided password is an invalid application password.' }], /WORDPRESS_APP_PASSWORD/],
-    [[401, { code: 'rest_cannot_create', message: 'Sorry, you are not allowed to create posts as this user.' }], /dropping the "Authorization" header/],
+    [[401, { code: 'rest_cannot_create', message: 'Sorry, you are not allowed to create posts as this user.' }], /did not accept the login. Most often WORDPRESS_APP_USER \/ WORDPRESS_APP_PASSWORD/],
     [[403, { code: 'rest_cannot_create', message: 'Sorry, you are not allowed to create posts as this user.' }], /won't let that user publish/],
     // What a Cloudflare/firewall block looks like: an HTML page, no WordPress code. Not a role problem.
     [[403, '<!DOCTYPE html><title>Attention Required! | Cloudflare</title>', { server: 'cloudflare', 'cf-ray': '8f1e2d3c4b5a6978-BOM', 'cf-mitigated': 'challenge' }],

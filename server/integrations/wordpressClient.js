@@ -30,11 +30,14 @@ export function explainWordPressError(status, body, slug, via = {}) {
       'the Render server\'s outbound IPs) for requests to /wp-json/. Its requests identify themselves as "DegreeBaba-Content-Studio".' +
       `${ray} Nothing was published.`;
   }
-  // Also what an unauthenticated create looks like (401 rest_cannot_create): the login never arrived.
+  // What WordPress says whenever it ends up treating the request as logged out. On the DegreeBaba
+  // site that includes a wrong application password (it doesn't say "incorrect password"), so
+  // the credentials are the first thing to check, the Authorization header the second.
   if (code === 'rest_not_logged_in' || (status === 401 && code === 'rest_cannot_create')) {
-    return 'WordPress did not receive the login. The WordPress server is dropping the "Authorization" header before ' +
-      'it reaches WordPress (common on Apache/LiteSpeed hosting). Whoever hosts the site needs to pass it through, e.g. add ' +
-      '"SetEnvIf Authorization (.*) HTTP_AUTHORIZATION=$1" to its .htaccess. Nothing was published.';
+    return 'WordPress did not accept the login. Most often WORDPRESS_APP_USER / WORDPRESS_APP_PASSWORD on the server ' +
+      "don't match: the user must be the WordPress login username, and the password an Application Password created for " +
+      'that same user (WP Admin > Users > Profile > Application Passwords). If they do match, the site\'s server may be ' +
+      'dropping the "Authorization" header (WP Admin > Tools > Site Health shows whether it arrives). Nothing was published.';
   }
   if (code === 'invalid_username' || code === 'incorrect_password' || code === 'application_passwords_disabled') {
     return `WordPress refused the login (${code}). Check WORDPRESS_APP_USER and WORDPRESS_APP_PASSWORD on the server - ` +
