@@ -1,3 +1,5 @@
+import http from 'node:http';
+import https from 'node:https';
 import { config, assertWordpressConfigured } from '../config.js';
 
 // The only file that talks to WordPress directly. Authenticates with an Application Password
@@ -54,6 +56,30 @@ export function explainWordPressError(status, body, slug, via = {}) {
   return body?.message || `WordPress REST API request failed (${status})`;
 }
 
+const USER_AGENT = 'DegreeBaba-Content-Studio (+publishing via the WordPress REST API)';
+
+// Node's built-in http(s) client rather than global fetch: fetch adds browser-style headers on its
+// own (sec-fetch-mode: cors, accept-language: *), which next to a non-browser User-Agent can trip
+// Cloudflare's bot scoring. This sends only the headers given, plus Host and Connection, which Node
+// adds for transport. http: is only for the local stand-in WordPress the tests run against.
+// Resolves with { status, headers, text }. If `signal` fires, it rejects with the signal's reason
+// (a TimeoutError for AbortSignal.timeout), even when the response had already started arriving.
+function sendRequest(url, { method, headers, body, signal }) {
+  return new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const transport = target.protocol === 'http:' ? http : https;
+    const fail = (e) => reject(signal?.aborted ? signal.reason : e);
+    const req = transport.request(target, { method, headers, signal }, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, text: Buffer.concat(chunks).toString('utf8') }));
+      res.on('error', fail);
+    });
+    req.on('error', fail);
+    req.end(body);
+  });
+}
+
 // ACF fields ride under the "acf" key on the standard post-object response/request shape — this
 // is WordPress's own convention once a field group has "Show in REST API" enabled, not something
 // specific to this app. `existingPostId` makes this an update (PUT) instead of a new post (POST),
@@ -65,21 +91,26 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
   const base = `${config.wordpress.siteUrl}/wp-json/wp/v2/${slug}`;
   const url = existingPostId ? `${base}/${existingPostId}` : base;
 
+  const payload = JSON.stringify({
+    title,
+    status: 'publish',
+    acf: acfFields
+  });
+
   let res;
   try {
-    res = await fetch(url, {
+    res = await sendRequest(url, {
       method: existingPostId ? 'PUT' : 'POST',
       headers: {
         'Content-Type': 'application/json',
+        Accept: '*/*',
         Authorization: authHeader(),
         // Named, so the site's firewall/Cloudflare rules can recognise and allow it.
-        'User-Agent': 'DegreeBaba-Content-Studio (+publishing via the WordPress REST API)'
+        'User-Agent': USER_AGENT,
+        // Set explicitly so the body goes as one sized message, not chunked.
+        'Content-Length': Buffer.byteLength(payload)
       },
-      body: JSON.stringify({
-        title,
-        status: 'publish',
-        acf: acfFields
-      }),
+      body: payload,
       // A slow or unreachable WordPress host must not hold the request open forever.
       signal: AbortSignal.timeout(config.limits.wordpressTimeoutMs)
     });
@@ -92,12 +123,12 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
     throw e;
   }
 
-  const text = await res.text();
+  const { text } = res;
   let body = null;
   try { body = JSON.parse(text); } catch { /* not JSON: didn't come from WordPress (see below) */ }
 
-  if (!res.ok) {
-    const via = { server: res.headers.get('server'), cfRay: res.headers.get('cf-ray'), cfMitigated: res.headers.get('cf-mitigated') };
+  if (res.status < 200 || res.status > 299) {
+    const via = { server: res.headers.server || null, cfRay: res.headers['cf-ray'] || null, cfMitigated: res.headers['cf-mitigated'] || null };
     // Everything the site's host needs to find the block in their own logs.
     console.error(`[wordpress] ${res.status} from ${url}: code=${body?.code || '-'} server=${via.server || '-'} cf-ray=${via.cfRay || '-'} cf-mitigated=${via.cfMitigated || '-'} body=${text.replace(/\s+/g, ' ').slice(0, 300)}`);
     throw new Error(explainWordPressError(res.status, body, slug, via));

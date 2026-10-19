@@ -89,9 +89,10 @@ test('every model call has a timeout and a token ceiling', () => {
 test('every outbound HTTP call to an outside service has a deadline', () => {
   for (const f of listFiles('server/integrations', ['.js'])) {
     const src = read(f);
-    const rawFetches = [...src.matchAll(/await fetch\(/g)].length;
+    // fetch() calls and Node http(s).request() calls alike (the WordPress client uses the latter).
+    const rawCalls = [...src.matchAll(/await fetch\(|\.request\(/g)].length;
     const guarded = [...src.matchAll(/signal: AbortSignal\.timeout\(/g)].length;
-    assert.ok(rawFetches <= guarded, `${f}: ${rawFetches} fetch() calls but only ${guarded} with a timeout`);
+    assert.ok(rawCalls <= guarded, `${f}: ${rawCalls} outbound calls but only ${guarded} with a timeout`);
   }
 });
 
