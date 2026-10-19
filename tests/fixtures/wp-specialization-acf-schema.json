@@ -1,0 +1,600 @@
+{
+ "description": "ACF field data",
+ "type": "object",
+ "properties": {
+  "spec_name": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "university_name": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "specialization_hero_description": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "linked_university": {
+   "type": [
+    "integer",
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "integer"
+   },
+   "minItems": 1
+  },
+  "linked_course": {
+   "type": [
+    "integer",
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "integer"
+   },
+   "minItems": 1
+  },
+  "duration": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "mode": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "naac_grade": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "ugc_status": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "best_price_specialization": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "duration_specialization": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "total_fee": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "download_brochure_specialization": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  },
+  "about_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "about_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "about_info": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "program_validity": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "highlights_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "eligibility_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "eligibility_content": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "eligibility_title": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "eligibility_description": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "eligibility_summary": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "fee_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "other_specs_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "syllabus_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "exam_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "admission_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "placement_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "jobs_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "jobs_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "faqs_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "syllabus_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "examination_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "examination_process": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "exam_process_title": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "exam_process_description": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "admission_steps": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "admission_fee_note": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "placement_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "hiring_partners_specialization": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "certificate_description": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "certificate_image_specialization": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  },
+  "emi_amount": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "highlights_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "other_specs": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "other_spec_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "other_spec_fee": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "job_profiles": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "job_title": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "avg_salary": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "reviews": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "review_text": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "reviewer_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "reviewer_label": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "faqs": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "question": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "answer": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "seo_title": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "meta_description": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "semester_plan_value": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "annual_plan_value": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "one-time_payment_value": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "specialization_lowest_emi_strats_from": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "partner_banks_specialization": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "syllabus_section_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "syllabus_description": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "academic_years": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "year_title": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "semesters": {
+      "type": [
+       "array",
+       "null"
+      ],
+      "required": false,
+      "items": {
+       "type": "object",
+       "properties": {
+        "semester_title": {
+         "type": [
+          "string",
+          "null"
+         ],
+         "required": false
+        },
+        "semester_subjects": {
+         "type": [
+          "string",
+          "null"
+         ],
+         "required": false
+        }
+       }
+      }
+     }
+    }
+   }
+  },
+  "fee_plans": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "plan_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "plan_amount": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "video_specialization": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  },
+  "video_specialization_thumbnail": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  }
+ }
+}

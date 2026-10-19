@@ -527,30 +527,29 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
   const title = (titleField && draft.form_data[titleField]) || 'Untitled';
   const acfFields = transformToACF(draft.form_data, draft.page_type);
 
-  // If this draft has generated marketing images (university never does; course/specialization/
-  // category get 1, blog gets 4 — see image_pipeline), fold their Cloudinary URLs into the same
-  // ACF payload under `<role>_image` so they publish alongside the rest of the page's content in
-  // one action. Not required — a draft with no generated images just publishes without these keys.
+  // Generated marketing images aren't sent: the site has no image field for them (they'd be the
+  // page's Featured Image, which needs uploading to WordPress's media library first - not built
+  // yet). Asking the image service for them here also made the whole publish fail, or wait a
+  // minute, whenever that service was asleep or down.
+
+  let published;
   try {
-    const generationStatus = await getGenerationStatus(draft.id);
-    for (const [role, image] of Object.entries(generationStatus.images || {})) {
-      if (image?.status === 'succeeded' && image.url) {
-        acfFields[`${role}_image`] = image.url;
-      }
-    }
+    published = await publishDraftToWordPress({
+      pageType: draft.page_type,
+      title,
+      acfFields,
+      existingPostId: draft.wordpress_post_id || undefined
+    });
   } catch (e) {
-    if (!/no generation job found/i.test(e.message)) throw e;
+    // A new page was created in WordPress but couldn't be filled in: remember it (no URL - it isn't
+    // live) so the next attempt updates that page instead of creating a second one.
+    if (e.wordpressPostId) await setWordpressPublishInfo(draft.id, { postId: e.wordpressPostId, url: null });
+    throw e;
   }
 
-  const { id: wordpressPostId, link } = await publishDraftToWordPress({
-    pageType: draft.page_type,
-    title,
-    acfFields,
-    existingPostId: draft.wordpress_post_id || undefined
-  });
-
-  const updated = await setWordpressPublishInfo(draft.id, { postId: wordpressPostId, url: link });
-  res.json({ draft: updated });
+  const updated = await setWordpressPublishInfo(draft.id, { postId: published.id, url: published.link });
+  // `skipped`: fields that had no place on the WordPress site, shown to the Admin after publishing.
+  res.json({ draft: updated, skipped: published.skipped });
 }));
 
 // --- Image pipeline (image_pipeline/, a separate Python service — see

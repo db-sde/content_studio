@@ -963,10 +963,13 @@ function ContentStudioApp() {
     if (!activeDraftId || isPublishing) return;
     setIsPublishing(true);
     try {
-      const { draft } = await draftsClient.publishToWordPress(activeDraftId);
+      const { draft, skipped = [] } = await draftsClient.publishToWordPress(activeDraftId);
       dispatch({ type: ACTIONS.SET_WORDPRESS_URL, payload: { wordpressUrl: draft.wordpress_url } });
       refreshDraftsList();
       toast.success('Published to WordPress — live now.');
+      // What had no matching field on the WordPress site (or no page to link to yet) - published
+      // without it, so the Admin knows what to add there by hand.
+      if (skipped.length) toast.info(`Not sent to WordPress: ${skipped.join('; ')}`, 20000);
     } catch (e) {
       console.error('Error publishing to WordPress', e);
       toast.error(e.message || 'Failed to publish to WordPress');

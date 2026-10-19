@@ -1,0 +1,463 @@
+{
+ "description": "ACF field data",
+ "type": "object",
+ "properties": {
+  "university_name": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "university_full_name": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "hero_description": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "established_year": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "naac_grade": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "ugc_approved": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "mode_of_learning": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "starting_fee": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "num_programs": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "about_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "about_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "nirf_rank": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "why_choose_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "why_choose_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "facts_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "facts_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "accreditations_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "programs_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "admission_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "emi_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "exam_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "faculty_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "placement_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "reviews_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "faqs_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "admission_steps": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "admission_fee_note": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "emi_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "exam_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "faculty_intro": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "placement_content": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "placement_highlights": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "accreditations": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "body_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "body_descriptor": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "body_detail": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "programs_table": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "program_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "program_fee": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "program_eligibility": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "faculty_members": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "member_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "member_designation": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "reviews": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "review_text": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "reviewer_name": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "reviewer_label": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "faqs": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "question": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "answer": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "seo_title": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "meta_description": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "programs_intro": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "examination_cards": {
+   "type": [
+    "array",
+    "null"
+   ],
+   "required": false,
+   "items": {
+    "type": "object",
+    "properties": {
+     "exam_card_title": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     },
+     "exam_card_description": {
+      "type": [
+       "string",
+       "null"
+      ],
+      "required": false
+     }
+    }
+   }
+  },
+  "emi_interest_rate_value": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "partner_banks_names": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "download_brochure_university": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  },
+  "video_university": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  },
+  "video_university_thumbnail": {
+   "type": [
+    "integer",
+    "null"
+   ],
+   "required": false
+  }
+ }
+}
