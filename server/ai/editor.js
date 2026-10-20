@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import Ajv from 'ajv';
 import * as openaiProvider from './providers/openaiProvider.js';
 import { buildEditorSystemPrompt, buildEditorUserPrompt } from './prompts/editorPrompts.js';
@@ -34,6 +35,12 @@ const OPENAI_JSON_SCHEMA = {
   schema: EVALUATION_SCHEMA
 };
 
+// Same style + same facts -> same key, for every field of a page and a later regenerate of one of
+// them, so OpenAI can reuse its cache of that prefix (see openaiProvider.complete for how much it does).
+function promptCacheKey(system, facts) {
+  return 'editor-' + createHash('sha256').update(system).update(JSON.stringify(facts ?? {})).digest('hex').slice(0, 24);
+}
+
 async function requestEvaluation(params, { forceJsonReminder = false } = {}) {
   const system = buildEditorSystemPrompt(params.styleProfile);
   const prompt = buildEditorUserPrompt({ ...params, jsonReminder: forceJsonReminder });
@@ -44,7 +51,8 @@ async function requestEvaluation(params, { forceJsonReminder = false } = {}) {
     maxTokens: 700,
     temperature: 0,
     timeoutMs: 30000,
-    jsonSchema: OPENAI_JSON_SCHEMA
+    jsonSchema: OPENAI_JSON_SCHEMA,
+    cacheKey: promptCacheKey(system, params.facts)
   });
 }
 

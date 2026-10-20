@@ -133,6 +133,12 @@ test('Generate All: one cache warm-up, then every field reads the same cached pr
   assert.ok(gptCalls.every(c => c.messages[1].content.startsWith('<structured_facts>')), 'facts first, so OpenAI can cache them');
   assert.equal(new Set(gptCalls.map(gptFactsPrefix)).size, 1);
   assert.equal(new Set(gptCalls.map(c => c.messages[0].content)).size, 1, 'one evaluator system prompt for every field');
+  // One OpenAI cache key for the whole page, so its scoring calls land where the prefix is cached.
+  assert.equal(new Set(gptCalls.map(c => c.prompt_cache_key)).size, 1);
+  assert.match(gptCalls[0].prompt_cache_key, /^editor-[0-9a-f]{24}$/);
+  // First drafts are written as before: the "write it directly" nudge is only for rewrites (and SEO lists).
+  const narrativeFirstDrafts = fieldCalls.filter(c => !/"(SEO Title|Meta Description)"/.test(c.body.messages[0].content[1].text));
+  assert.ok(narrativeFirstDrafts.length && narrativeFirstDrafts.every(c => !/without extended deliberation/.test(c.body.messages[0].content[1].text)));
 
   const { rows: seoEvals } = await t.query(
     "SELECT e.model, e.status, g.field_key FROM evaluation_logs e JOIN generation_logs g ON g.id = e.generation_log_id WHERE g.draft_id = $1 AND g.field_key IN ('seo_title', 'meta_description')",
@@ -246,6 +252,8 @@ test('a narrative field that scores low is rewritten once - never more than 2 + 
   assert.equal(gptCalls.length, 2);
   assert.equal(r.body.attemptsUsed, 2);
   assert.match(claudeCalls[1].body.messages[0].content[1].text, /Tighten the second sentence/);
+  assert.match(claudeCalls[1].body.messages[0].content[1].text, /Write it directly, without extended deliberation/, 'rewrites were where Sonnet most often thought until it ran out');
+  assert.equal(gptCalls[0].prompt_cache_key, gptCalls[1].prompt_cache_key, 'the rewrite is scored with the same cache key');
   assert.deepEqual(claudeCalls[1].body.messages[0].content[0], claudeCalls[0].body.messages[0].content[0], 'the rewrite reads the same cached facts');
 });
 

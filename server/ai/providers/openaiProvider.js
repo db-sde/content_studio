@@ -21,7 +21,12 @@ export function __setClientForTests(fake) {
 
 // `jsonSchema` (optional) — pass an OpenAI Structured Outputs json_schema descriptor to force
 // strict-schema JSON back. Callers still must NOT trust this blindly — see ai/editor.js.
-export async function complete({ system, prompt, maxTokens = 800, timeoutMs = 30000, jsonSchema = null, temperature = 0 }) {
+// `cacheKey` (optional): calls that share a long prompt prefix should pass the same key - OpenAI uses
+// it to send them to the server holding that prefix's cache. Measured (Oct 2026) on the editor's
+// calls: an exact repeat is cached (2,176 of 2,324 tokens), but a page's calls for different fields,
+// though they share their first ~2,100 tokens, were cached only occasionally, key or no key, and
+// with the facts in the system message too. So it helps repeats; don't count on it across fields.
+export async function complete({ system, prompt, maxTokens = 800, timeoutMs = 30000, jsonSchema = null, temperature = 0, cacheKey = null }) {
   const openai = getClient();
 
   const response = await openai.chat.completions.create(
@@ -33,7 +38,8 @@ export async function complete({ system, prompt, maxTokens = 800, timeoutMs = 30
         { role: 'system', content: system },
         { role: 'user', content: prompt }
       ],
-      ...(jsonSchema ? { response_format: { type: 'json_schema', json_schema: jsonSchema } } : {})
+      ...(jsonSchema ? { response_format: { type: 'json_schema', json_schema: jsonSchema } } : {}),
+      ...(cacheKey ? { prompt_cache_key: cacheKey } : {})
     },
     { timeout: timeoutMs }
   );

@@ -35,7 +35,9 @@ export function buildWriterUserPrompt({ fieldLabel, fieldInstructions, outputFor
   }
 
   if (existingContent) {
-    prompt += `<existing_content>\n${existingContent}\n</existing_content>\nWrite a genuinely different version — do not just lightly reword the existing content.\n\n`;
+    // "Write it directly": rewrites (this block) were where Sonnet most often spent its whole output
+    // allowance thinking and returned nothing (measured: 3 of 4 empty calls, both rewrites on one page).
+    prompt += `<existing_content>\n${existingContent}\n</existing_content>\nWrite a genuinely different version — do not just lightly reword the existing content. Write it directly, without extended deliberation.\n\n`;
   }
 
   if (evaluatorFeedback) {
