@@ -1029,7 +1029,10 @@ function ContentStudioApp() {
   // were only ever going to 403. Per-draft failures beyond that (e.g. WordPress unreachable) are
   // still tolerated individually rather than aborting the whole batch — same reasoning as
   // generateAllAiFields's partial-failure handling.
-  const runBulkDraftAction = async (eligibleStatuses, actionFn, actionLabel) => {
+  // `sequential`: one draft at a time instead of all at once - used for publishing, where each draft
+  // is several requests to WordPress and a burst of them from our server is what Cloudflare's bot
+  // check challenges.
+  const runBulkDraftAction = async (eligibleStatuses, actionFn, actionLabel, { sequential = false } = {}) => {
     const selectedIds = [...selectedDraftIds];
     if (!selectedIds.length || isBulkActing) return;
 
@@ -1041,14 +1044,25 @@ function ContentStudioApp() {
     }
 
     setIsBulkActing(true);
-    const results = await Promise.allSettled(eligibleIds.map(id => actionFn(id)));
+    let results;
+    if (sequential) {
+      results = [];
+      for (const id of eligibleIds) {
+        try { results.push({ status: 'fulfilled', value: await actionFn(id) }); } catch (reason) { results.push({ status: 'rejected', reason }); }
+      }
+    } else {
+      results = await Promise.allSettled(eligibleIds.map(id => actionFn(id)));
+    }
     const succeeded = results.filter(r => r.status === 'fulfilled').length;
     const failed = results.length - succeeded;
 
     let message = `${actionLabel}: ${succeeded} succeeded`;
     if (failed) message += `, ${failed} failed`;
     if (skipped) message += `, ${skipped} skipped (not eligible)`;
-    (succeeded ? toast.success : toast.error)(`${message}.`);
+    // Why the first one failed - otherwise a Cloudflare block or a WordPress rejection is invisible here.
+    const firstFailure = results.find(r => r.status === 'rejected')?.reason?.message;
+    if (firstFailure) message += `. First failure: ${firstFailure}`;
+    (succeeded ? toast.success : toast.error)(`${message}${firstFailure ? '' : '.'}`, firstFailure ? 20000 : undefined);
 
     setSelectedDraftIds(new Set());
     setIsBulkActing(false);
@@ -1056,7 +1070,7 @@ function ContentStudioApp() {
   };
 
   const handleBulkApprove = () => runBulkDraftAction(['admin_review'], (id) => draftsClient.approveDraft(id), 'Mass approve');
-  const handleBulkPublish = () => runBulkDraftAction(['approved'], (id) => draftsClient.publishToWordPress(id), 'Mass publish');
+  const handleBulkPublish = () => runBulkDraftAction(['approved'], (id) => draftsClient.publishToWordPress(id), 'Mass publish', { sequential: true });
 
   const handleToggleAllowInternAiEdit = async () => {
     if (!activeDraftId || isTogglingAllowAiEdit) return;

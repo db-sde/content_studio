@@ -103,33 +103,53 @@ class WordPressError extends Error {
   }
 }
 
+// Cloudflare's bot check doesn't score every request the same: a request from this server that it
+// challenges may go through a few seconds later (a publish was challenged on one day and went
+// through on the next). A challenged request never reached WordPress, so sending it once more can't
+// create anything twice. Only once: a block that persists needs the site's Cloudflare rule.
+let challengeRetryDelayMs = 3000;
+export function __setChallengeRetryDelayForTests(ms) {
+  challengeRetryDelayMs = ms;
+}
+
+const isCloudflareChallenge = (res) => Boolean(res.headers['cf-mitigated'])
+  || ([403, 429, 503].includes(res.status) && res.headers.server === 'cloudflare' && !/^\s*[{[]/.test(res.text));
+
 async function wpRequest(method, path, { json, slug } = {}) {
   const url = `${config.wordpress.siteUrl}/wp-json/wp/v2/${path}`;
   const payload = json === undefined ? undefined : JSON.stringify(json);
-  let res;
-  try {
-    res = await sendRequest(url, {
-      method,
-      headers: {
-        ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
-        Accept: '*/*',
-        Authorization: authHeader(),
-        // Named, so the site's firewall/Cloudflare rules can recognise and allow it.
-        'User-Agent': USER_AGENT,
-        // Set explicitly so a body goes as one sized message, not chunked.
-        ...(payload === undefined ? {} : { 'Content-Length': Buffer.byteLength(payload) })
-      },
-      body: payload,
-      // A slow or unreachable WordPress host must not hold the request open forever.
-      signal: AbortSignal.timeout(config.limits.wordpressTimeoutMs)
-    });
-  } catch (e) {
-    if (e.name === 'TimeoutError' || e.name === 'AbortError') {
-      const err = new Error(`WordPress didn't respond within ${Math.max(1, Math.round(config.limits.wordpressTimeoutMs / 1000))}s - nothing was published; try again.`);
-      err.status = 504;
-      throw err;
+  const send = async () => {
+    try {
+      return await sendRequest(url, {
+        method,
+        headers: {
+          ...(payload === undefined ? {} : { 'Content-Type': 'application/json' }),
+          Accept: '*/*',
+          Authorization: authHeader(),
+          // Named, so the site's firewall/Cloudflare rules can recognise and allow it.
+          'User-Agent': USER_AGENT,
+          // Set explicitly so a body goes as one sized message, not chunked.
+          ...(payload === undefined ? {} : { 'Content-Length': Buffer.byteLength(payload) })
+        },
+        body: payload,
+        // A slow or unreachable WordPress host must not hold the request open forever.
+        signal: AbortSignal.timeout(config.limits.wordpressTimeoutMs)
+      });
+    } catch (e) {
+      if (e.name === 'TimeoutError' || e.name === 'AbortError') {
+        const err = new Error(`WordPress didn't respond within ${Math.max(1, Math.round(config.limits.wordpressTimeoutMs / 1000))}s - nothing was published; try again.`);
+        err.status = 504;
+        throw err;
+      }
+      throw e;
     }
-    throw e;
+  };
+
+  let res = await send();
+  if (isCloudflareChallenge(res)) {
+    console.warn(`[wordpress] Cloudflare challenged ${method} ${url} (cf-ray=${res.headers['cf-ray'] || '-'}); trying once more in ${challengeRetryDelayMs}ms`);
+    await new Promise(resolve => setTimeout(resolve, challengeRetryDelayMs));
+    res = await send();
   }
 
   const { text } = res;

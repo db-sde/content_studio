@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import https from 'node:https';
 import express from 'express';
 import { config } from '../server/config.js';
-import { publishDraftToWordPress, __clearWordPressCachesForTests } from '../server/integrations/wordpressClient.js';
+import { publishDraftToWordPress, __clearWordPressCachesForTests, __setChallengeRetryDelayForTests } from '../server/integrations/wordpressClient.js';
 import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost } from '../server/integrations/wordpressAcf.js';
 import { transformToACF } from '../src/config/schemas.js';
 import { startTestApp, completeSpecializationFormData } from './helpers/testApp.js';
@@ -45,17 +45,22 @@ let server, wp;
 const requests = [];
 
 function resetWordPress() {
-  wp = { posts: new Map(), nextId: 900, linkable: { university: [], course: [] }, failWith: null, failFill: null, delayMs: 0 };
+  wp = { posts: new Map(), nextId: 900, linkable: { university: [], course: [] }, failWith: null, failFill: null, delayMs: 0, challengeOnce: new Set() };
 }
 
 before(async () => {
   resetWordPress();
+  __setChallengeRetryDelayForTests(10);
   const app = express();
   app.use(express.json());
   app.use((req, res) => {
     requests.push({ method: req.method, path: req.path, query: req.query, headers: req.headers, body: req.body });
     setTimeout(() => {
       if (res.destroyed) return;
+      // Challenge the first request of each listed method, then let that method through.
+      if (wp.challengeOnce.delete(req.method)) {
+        return res.status(403).set({ server: 'cloudflare', 'cf-ray': 'a4da137a3d4a5aae-CMH', 'cf-mitigated': 'challenge' }).type('html').send('<!DOCTYPE html><title>Just a moment...</title>');
+      }
       if (wp.failWith) {
         const [status, body, headers = {}] = wp.failWith;
         res.status(status).set(headers);
@@ -282,6 +287,21 @@ test('a WordPress that does not answer in time gives the 504 "nothing was publis
   } finally {
     config.limits.wordpressTimeoutMs = saved;
   }
+});
+
+test('a Cloudflare challenge is retried once: a request let through on the second try publishes', async () => {
+  wp.challengeOnce = new Set(['OPTIONS', 'POST']); // the schema check and the create: each challenged once, then allowed
+  const result = await publishDraftToWordPress({ pageType: 'specialization', title: 'X', acfFields: { spec_name: 'X' } });
+  assert.equal(result.status, 'publish');
+  assert.deepEqual(requests.map(r => r.method), ['OPTIONS', 'OPTIONS', 'POST', 'POST', 'PUT']);
+  assert.equal(wp.posts.size, 1, 'the challenged create never reached WordPress, so no duplicate');
+});
+
+test('a block that persists is tried exactly twice, then reported with its ray ID', async () => {
+  wp.failWith = [403, '<!DOCTYPE html><title>Just a moment...</title>', { server: 'cloudflare', 'cf-ray': 'a4da137a3d4a5aae-CMH', 'cf-mitigated': 'challenge' }];
+  await assert.rejects(() => publishDraftToWordPress({ pageType: 'specialization', title: 'X', acfFields: { spec_name: 'X' } }), /Cloudflare challenge.*ray ID: a4da137a3d4a5aae-CMH/);
+  assert.equal(requests.filter(r => r.method === 'POST').length, 2);
+  assert.equal(wp.posts.size, 0);
 });
 
 test('the test safety net also stops https.request to an outside host', () => {
