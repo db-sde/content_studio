@@ -183,6 +183,17 @@ export function __clearWordPressCachesForTests() {
   schemaCache.clear();
 }
 
+// The status of a page published earlier ('publish', 'draft', 'trash'...), or null if it no longer exists.
+async function getPostStatus(slug, postId) {
+  try {
+    const post = await wpRequest('GET', `${slug}/${postId}?context=edit&_fields=id,status`, { slug });
+    return post?.status || null;
+  } catch (e) {
+    if (e.code === 'rest_post_invalid_id') return null;
+    throw e;
+  }
+}
+
 // Linked University / Linked Course: the name chosen in Content Studio -> the ID of that page on the
 // site. Not found (not published to WordPress yet) or ambiguous -> left out, with a note; never
 // sent as a blank, which would wipe a link set by hand in WordPress.
@@ -209,7 +220,8 @@ async function findLinkedPostIds(pageType, linkedNames) {
 
 // Publishes one approved draft. `acfFields` is the draft's export (transformToACF, plus generated
 // image URLs); it is mapped onto the site's own fields here (see wordpressAcf.js). Returns
-// { id, link, status, skipped } - `skipped` lists what had nowhere to go on WordPress.
+// { id, link, status, skipped, recreated } - `skipped` lists what had nowhere to go on WordPress;
+// `recreated` means the page published last time was gone (deleted or in Trash), so a new one was made.
 //
 // New pages are created first and filled in a second request: on this site "acf" sent together with
 // the create is silently dropped (the page is created with every field empty - found by the Micro
@@ -236,14 +248,23 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
 
   const fill = (postId) => wpRequest('PUT', `${slug}/${postId}`, { slug, json: { title, status: 'publish', acf } });
 
+  // Re-publishing: update the page published last time, unless it has since been deleted in
+  // WordPress or moved to its Trash. A trashed page is left there rather than updated: WordPress
+  // renames a trashed page's address to ".../<name>__trashed/", and updating it would bring it back
+  // under that address. A fresh page gets the normal one.
   let post;
+  let recreated = false;
   if (existingPostId) {
-    try {
-      post = await fill(existingPostId);
-    } catch (e) {
-      // The page was deleted in WordPress since the last publish: start a new one below.
-      if (e.code !== 'rest_post_invalid_id') throw e;
+    const existing = await getPostStatus(slug, existingPostId);
+    if (existing && existing !== 'trash') {
+      try {
+        post = await fill(existingPostId);
+      } catch (e) {
+        // Deleted between the check and the update: start a new one below.
+        if (e.code !== 'rest_post_invalid_id') throw e;
+      }
     }
+    recreated = !post;
   }
   if (!post) {
     const created = await wpRequest('POST', slug, { slug, json: { title, status: 'draft' } });
@@ -257,5 +278,5 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
   }
 
   if (skipped.length) console.warn(`[wordpress] published ${slug} ${post.id}; not sent: ${skipped.join('; ')}`);
-  return { id: post.id, link: post.link, status: post.status, skipped };
+  return { id: post.id, link: post.link, status: post.status, skipped, recreated };
 }

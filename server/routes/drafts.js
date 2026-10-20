@@ -549,7 +549,8 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
 
   const updated = await setWordpressPublishInfo(draft.id, { postId: published.id, url: published.link });
   // `skipped`: fields that had no place on the WordPress site, shown to the Admin after publishing.
-  res.json({ draft: updated, skipped: published.skipped });
+  // `recreated`: the page published last time had been deleted or trashed in WordPress, so this one is new.
+  res.json({ draft: updated, skipped: published.skipped, recreated: published.recreated });
 }));
 
 // --- Image pipeline (image_pipeline/, a separate Python service — see

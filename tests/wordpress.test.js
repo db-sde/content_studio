@@ -71,6 +71,10 @@ before(async () => {
       if (!schema) return res.status(404).json({ code: 'rest_no_route', message: 'No route was found matching the URL and request method.' });
       const [, type, id] = m;
       if (req.method === 'OPTIONS') return res.json({ schema: { properties: { acf: schema } } });
+      if (req.method === 'GET' && id) {
+        const post = wp.posts.get(Number(id));
+        return post ? res.json({ id: post.id, status: post.status }) : res.status(404).json({ code: 'rest_post_invalid_id', message: 'Invalid post ID.' });
+      }
       if (req.method === 'GET') return res.json(wp.linkable[type] || []);
       if (req.method === 'POST' && !id) {
         // The real site's quirk: "acf" sent with a create is silently dropped.
@@ -240,16 +244,29 @@ test('eligibility rich text, syllabus and linked-post helpers', () => {
   assert.equal(pickLinkedPost([{ id: 1, title: { rendered: 'Online MBA' } }, { id: 2, title: { rendered: 'Online MBA' } }], 'Online MBA'), null, 'ambiguous');
 });
 
-test('re-publishing updates the same page in place; a page deleted in WordPress is recreated', async () => {
+test('re-publishing updates the same page in place', async () => {
   wp.posts.set(42, { id: 42, status: 'publish', acf: {}, type: 'specialization' });
   const again = await publishDraftToWordPress({ pageType: 'specialization', title: 'Online MBA', acfFields: { spec_name: 'Online MBA' }, existingPostId: 42 });
   assert.equal(again.id, 42);
-  assert.deepEqual(requests.filter(r => r.method !== 'OPTIONS').map(r => `${r.method} ${r.path}`), ['PUT /wp-json/wp/v2/specialization/42']);
+  assert.equal(again.recreated, false);
+  assert.deepEqual(requests.filter(r => r.method !== 'OPTIONS').map(r => `${r.method} ${r.path}`), ['GET /wp-json/wp/v2/specialization/42', 'PUT /wp-json/wp/v2/specialization/42']);
+});
 
-  requests.length = 0;
-  const recreated = await publishDraftToWordPress({ pageType: 'specialization', title: 'Online MBA', acfFields: { spec_name: 'Online MBA' }, existingPostId: 7 });
-  assert.notEqual(recreated.id, 7);
-  assert.deepEqual(requests.filter(r => r.method !== 'OPTIONS').map(r => r.method), ['PUT', 'POST', 'PUT']);
+test('re-publishing a page that was deleted in WordPress creates a new one', async () => {
+  const result = await publishDraftToWordPress({ pageType: 'specialization', title: 'Online MBA', acfFields: { spec_name: 'Online MBA' }, existingPostId: 7 });
+  assert.notEqual(result.id, 7);
+  assert.equal(result.recreated, true);
+  assert.equal(wp.posts.get(result.id).status, 'publish');
+  assert.deepEqual(requests.filter(r => r.method !== 'OPTIONS').map(r => r.method), ['GET', 'POST', 'PUT']);
+});
+
+test("re-publishing a page that is in WordPress's Trash creates a fresh one and leaves the trashed one alone", async () => {
+  wp.posts.set(42, { id: 42, status: 'trash', acf: {}, type: 'specialization' });
+  const result = await publishDraftToWordPress({ pageType: 'specialization', title: 'Online MBA', acfFields: { spec_name: 'Online MBA' }, existingPostId: 42 });
+  assert.notEqual(result.id, 42);
+  assert.equal(result.recreated, true);
+  assert.equal(wp.posts.get(42).status, 'trash', 'not pulled back out of the Trash under its __trashed address');
+  assert.ok(!requests.some(r => r.method === 'PUT' && r.path.endsWith('/42')));
 });
 
 test("if filling a new page fails, the error says why and carries the draft page's ID for the retry", async () => {

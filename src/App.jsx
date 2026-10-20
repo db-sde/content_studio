@@ -49,7 +49,7 @@ import {
   ArrowLeft, Save, Download, Eye, Copy, Trash2,
   History, Sparkles, CheckCircle, AlertCircle, X, ChevronRight,
   Check, CornerDownRight, ClipboardPaste, GraduationCap, BookOpen, Award, Pencil, Bell,
-  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock
+  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock, RotateCw
 } from 'lucide-react';
 import './App.css';
 
@@ -963,10 +963,12 @@ function ContentStudioApp() {
     if (!activeDraftId || isPublishing) return;
     setIsPublishing(true);
     try {
-      const { draft, skipped = [] } = await draftsClient.publishToWordPress(activeDraftId);
+      const { draft, skipped = [], recreated } = await draftsClient.publishToWordPress(activeDraftId);
       dispatch({ type: ACTIONS.SET_WORDPRESS_URL, payload: { wordpressUrl: draft.wordpress_url } });
       refreshDraftsList();
-      toast.success('Published to WordPress — live now.');
+      toast.success(recreated
+        ? 'The page published earlier was gone from WordPress (deleted or in Trash), so a new page was created — live now.'
+        : 'Published to WordPress — live now.');
       // What had no matching field on the WordPress site (or no page to link to yet) - published
       // without it, so the Admin knows what to add there by hand.
       if (skipped.length) toast.info(`Not sent to WordPress: ${skipped.join('; ')}`, 20000);
@@ -976,6 +978,18 @@ function ContentStudioApp() {
     } finally {
       setIsPublishing(false);
     }
+  };
+
+  // Publishing again after the first time: replaces the page's content on WordPress with this draft,
+  // or recreates the page if it was deleted/trashed there. Confirmed first, since it overwrites any
+  // edits made directly in WordPress.
+  const handleRepublishToWordPress = () => {
+    setConfirmModal({
+      title: 'Re-publish to WordPress?',
+      message: "This sends the current draft to WordPress again and replaces the page's content there, so any edits made directly in WordPress will be overwritten. If the page was deleted or moved to Trash in WordPress, a new page is created.",
+      confirmLabel: 'Re-publish',
+      onConfirm: handlePublishToWordPress
+    });
   };
 
   // Fires the Admin's direct status-jump straight from the Saved Drafts list's status chip, no
@@ -2478,15 +2492,27 @@ function ContentStudioApp() {
                       Reopen for Corrections
                     </button>
                     {wordpressUrl ? (
-                      <a
-                        href={wordpressUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="flex items-center gap-1.5 px-4 py-1.5 bg-green-success hover:brightness-110 font-bold text-xs rounded text-white transition-all shadow-md"
-                      >
-                        <ExternalLink className="w-3.5 h-3.5" />
-                        View Live
-                      </a>
+                      <>
+                        <button
+                          type="button"
+                          onClick={handleRepublishToWordPress}
+                          disabled={isPublishing}
+                          title="Send this draft to WordPress again - updates the live page, or creates a new one if it was deleted there"
+                          className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 disabled:text-gray-400 disabled:cursor-not-allowed font-bold text-xs rounded transition-all text-white"
+                        >
+                          <RotateCw className={`w-3.5 h-3.5 ${isPublishing ? 'animate-spin' : ''}`} />
+                          {isPublishing ? 'Publishing…' : 'Re-publish'}
+                        </button>
+                        <a
+                          href={wordpressUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="flex items-center gap-1.5 px-4 py-1.5 bg-green-success hover:brightness-110 font-bold text-xs rounded text-white transition-all shadow-md"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                          View Live
+                        </a>
+                      </>
                     ) : (
                       <button
                         type="button"
