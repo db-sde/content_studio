@@ -8,7 +8,8 @@ import {
 import { canEditField, getLockReason } from '../src/utils/permissions.js';
 import { isUserActive, IDLE_AFTER_MS, POLL_INTERVAL_MS, LIST_POLL_INTERVAL_MS, SLOW_POLL_INTERVAL_MS } from '../src/utils/useActivePolling.js';
 import { NOTIFICATION_TYPE_VERBS } from '../src/utils/notificationFormat.js';
-import { universityKey, universityOptions, NO_UNIVERSITY } from '../src/utils/universityFilter.js';
+import { universityKey, NO_UNIVERSITY } from '../src/utils/universityFilter.js';
+import { ALL, buildDraftColumns, matchesOtherColumns, columnOptions, columnOptionsWithChoice, programOf } from '../src/utils/draftColumnFilters.js';
 
 test('headings: first letter of every word capitalised, acronyms and apostrophes untouched', () => {
   assert.equal(toTitleCase('about the program'), 'About The Program');
@@ -87,13 +88,62 @@ test('every notification type has wording', () => {
   for (const [type, verb] of Object.entries(NOTIFICATION_TYPE_VERBS)) assert.ok(verb && verb.length > 2, type);
 });
 
-test('university filter: spellings that differ only in case or punctuation are one university', () => {
-  const drafts = [
-    { university_name: 'Jain University Online' }, { university_name: 'JAIN University  Online' },
-    { university_name: 'Jain University Online' }, { university_name: 'NMIMS' }, { university_name: '' }, {}
-  ];
-  const options = universityOptions(drafts);
-  assert.deepEqual(options.map(o => [o.label, o.count]), [['Jain University Online', 3], ['NMIMS', 1], ['No university yet', 2]]);
+// The Saved Drafts table's column-header dropdowns.
+const NOW = new Date('2026-10-22T12:00:00Z');
+const daysAgo = (n) => new Date(NOW.getTime() - n * 24 * 60 * 60 * 1000).toISOString();
+const SAMPLE = [
+  { id: 1, page_type: 'specialization', university_name: 'Jain University Online', spec_name: 'Online MBA in AI for Finance', owner: [7, 'Mistu'], status: 'admin_review', updated_at: daysAgo(0), last_edited_by_name: 'Krishna Porwal' },
+  { id: 2, page_type: 'specialization', university_name: 'JAIN University  Online', spec_name: 'Online MCA in Data Science', owner: [8, 'Harshita'], status: 'senior_review', prioritized_at: daysAgo(1), updated_at: daysAgo(3), last_edited_by_name: 'Harshita' },
+  { id: 3, page_type: 'specialization', university_name: 'Amity University Online', spec_name: 'Online MBA With Career Pathways', owner: [8, 'Harshita'], status: 'admin_review', updated_at: daysAgo(10), last_edited_by_name: 'Krishna Porwal', dup: 'duplicate' },
+  { id: 4, page_type: 'course', university_name: 'Amity University Online', program_name: 'Online MBA', owner: [7, 'Mistu'], status: 'approved', updated_at: daysAgo(45), last_edited_by_name: 'Admin' },
+  { id: 5, page_type: 'university', university_name: '', owner: [8, 'Harshita'], status: 'intern_editing', updated_at: daysAgo(0) }
+];
+const COLUMNS = buildDraftColumns({
+  title: (d) => d.spec_name || d.program_name || d.university_name || '',
+  isUntitled: (d) => !(d.spec_name || d.program_name || d.university_name),
+  isDuplicate: (d) => d.dup === 'duplicate', isRepeated: (d) => d.dup === 'duplicate',
+  ownerId: (d) => d.owner?.[0], ownerName: (d) => d.owner?.[1],
+  statusLabels: { intern_editing: 'Intern Editing', senior_review: 'Senior Review', admin_review: 'Admin Review', approved: 'Approved' },
+  pageTypeLabel: (t) => ({ specialization: 'Specialization Page', course: 'Course Page', university: 'University Page' })[t], now: NOW
+});
+const col = (id) => COLUMNS.find(c => c.id === id);
+const opts = (id, drafts = SAMPLE) => columnOptions(drafts, col(id)).map(o => `${o.label} (${o.count})`);
+const pick = (filters) => SAMPLE.filter(d => matchesOtherColumns(d, COLUMNS, { ...Object.fromEntries(COLUMNS.map(c => [c.id, ALL])), ...filters })).map(d => d.id);
+
+test('column filters: each column offers its values with counts, most common spelling first', () => {
+  assert.deepEqual(opts('university'), ['Amity University Online (2)', 'Jain University Online (2)', 'No university yet (1)']);
   assert.equal(universityKey('JAIN University  Online'), universityKey('jain university online'));
   assert.equal(universityKey('   '), NO_UNIVERSITY);
+  assert.deepEqual(opts('pageType'), ['Course Page (1)', 'Specialization Page (3)', 'University Page (1)']);
+  assert.deepEqual(opts('program'), ['Online MBA (3)', 'Online MCA (1)', 'Untitled (1)']);
+  assert.deepEqual(opts('intern'), ['Harshita (3)', 'Mistu (2)']);
+  assert.deepEqual(opts('duplicate'), ['Unique (3)', 'Duplicate (1)', 'Untitled (1)']);
+  assert.deepEqual(opts('status'), ['Intern Editing (1)', 'Senior Review (1)', 'Admin Review (2)', 'Approved (1)', 'Sent back (1)']);
+  assert.deepEqual(opts('edited'), ['Today (2)', 'Last 7 days (3)', 'Last 30 days (4)', 'Older than 30 days (1)', 'Admin (1)', 'Harshita (1)', 'Krishna Porwal (2)']);
+});
+
+test('column filters combine, and a sent-back draft matches both its stage and "Sent back"', () => {
+  assert.deepEqual(pick({ intern: 'user:8', status: 'admin_review' }), [3]);
+  assert.deepEqual(pick({ status: 'sent_back' }), [2]);
+  assert.deepEqual(pick({ status: 'senior_review' }), [2]);
+  assert.deepEqual(pick({ edited: '7d', university: universityKey('jain university online') }), [1, 2]);
+  assert.deepEqual(pick({ edited: 'by:krishna porwal', program: 'online mba' }), [1, 3]);
+  // Faceted: the intern dropdown, with Amity chosen, counts only Amity's pages.
+  const amity = SAMPLE.filter(d => matchesOtherColumns(d, COLUMNS, { university: universityKey('Amity University Online') }, 'intern'));
+  assert.deepEqual(opts('intern', amity), ['Harshita (1)', 'Mistu (1)']);
+});
+
+test('a chosen option that matches nothing under the other filters keeps its name, with (0)', () => {
+  const approvedOnly = SAMPLE.filter(d => d.status === 'approved');
+  const shown = columnOptionsWithChoice(SAMPLE, approvedOnly, col('university'), universityKey('Jain University Online'));
+  assert.deepEqual(shown.map(o => `${o.label} (${o.count})`), ['Amity University Online (1)', 'Jain University Online (0)']);
+});
+
+test('the program a title belongs to', () => {
+  assert.equal(programOf('Online MBA in AI for Finance'), 'Online MBA');
+  assert.equal(programOf('Online MBA With PMI Certification Pathways'), 'Online MBA');
+  assert.equal(programOf('Online M.Com in Accounting & Taxation'), 'Online M.Com');
+  assert.equal(programOf('MBA (Executive)'), 'MBA');
+  assert.equal(programOf('Online MBA - Finance'), 'Online MBA');
+  assert.equal(programOf('Master of Business Administration'), 'Master of Business Administration');
 });

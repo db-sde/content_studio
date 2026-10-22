@@ -27,7 +27,8 @@ import { AiFieldToolbar } from './components/AiFieldToolbar';
 import { AssignInternMenu } from './components/AssignInternMenu';
 import { InvitePanel } from './components/InvitePanel';
 import { RemarksPanel } from './components/RemarksPanel';
-import { universityKey, universityOptions } from './utils/universityFilter';
+import { ColumnFilter } from './components/ColumnFilter';
+import { ALL, buildDraftColumns, matchesOtherColumns, columnOptionsWithChoice } from './utils/draftColumnFilters';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import { ImageGenerationPanel } from './components/ImageGenerationPanel';
 import { StandaloneImageGeneratorPanel } from './components/StandaloneImageGeneratorPanel';
@@ -106,6 +107,20 @@ const ownerIdOf = (draft) => draft.owner_user_id ?? draft.created_by_user_id;
 const ownerNameOf = (draft) => draft.owner_name ?? draft.created_by_name;
 
 const DRAFT_FILTER_KEYS = ['all', ...ALL_DRAFT_STATUSES, 'sent_back', 'duplicates'];
+
+// Saved Drafts table columns that get a filter dropdown in their header (utils/draftColumnFilters.js).
+const DRAFT_TABLE_COLUMNS = [
+  { id: 'university', label: 'University Name', allLabel: 'All universities' },
+  { id: 'pageType', label: 'Page Type', allLabel: 'All types' },
+  { id: 'program', label: 'Page/Spec Title', allLabel: 'All programs' },
+  { id: 'intern', label: 'Intern', allLabel: 'All interns' },
+  { id: 'duplicate', label: 'Duplicate Check', allLabel: 'All' },
+  { id: 'status', label: 'Status', allLabel: 'All stages' },
+  { id: 'edited', label: 'Last Edited', allLabel: 'Any time' }
+];
+const EMPTY_COLUMN_FILTERS = Object.fromEntries(DRAFT_TABLE_COLUMNS.filter(c => c.id !== 'status').map(c => [c.id, 'all']));
+// What the Status column's dropdown can hold; the status buttons' "Duplicates" isn't one of them.
+const STATUS_COLUMN_KEYS = [...ALL_DRAFT_STATUSES, 'sent_back'];
 
 const DRAFT_FILTER_LABELS = { all: 'All', ...DRAFT_STATUS_LABELS, sent_back: 'Sent Back', duplicates: 'Duplicates' };
 
@@ -310,8 +325,9 @@ function ContentStudioApp() {
   const [statusChipOpenFor, setStatusChipOpenFor] = useState(null);
   // Saved Drafts list filter, available to all three roles — 'all' or one of ALL_DRAFT_STATUSES.
   const [draftsStatusFilter, setDraftsStatusFilter] = useState('all');
-  // University filter on the Saved Drafts list: 'all', NO_UNIVERSITY, or a universityKey().
-  const [draftsUniversityFilter, setDraftsUniversityFilter] = useState('all');
+  // Column-header filters on the Saved Drafts table (see utils/draftColumnFilters.js); the Status
+  // column shares draftsStatusFilter with the status buttons above the table.
+  const [draftColumnFilters, setDraftColumnFilters] = useState(EMPTY_COLUMN_FILTERS);
   const [showBulkPasteModal, setShowBulkPasteModal] = useState(false);
   const [bulkPasteResult, setBulkPasteResult] = useState(null);
   const [activeSectionId, setActiveSectionId] = useState(null);
@@ -560,8 +576,6 @@ function ContentStudioApp() {
     if (filter === 'duplicates') return isRepeatedDraft(draft);
     return draft.status === filter;
   };
-
-  const draftMatchesUniversity = (draft, filter) => filter === 'all' || universityKey(draft.university_name) === filter;
 
   const draftMatchesSearch = (draft, query) => {
     if (!query) return true;
@@ -1828,11 +1842,31 @@ function ContentStudioApp() {
               <div className="bg-white border border-border rounded-2xl p-6 shadow-premium">
                 {(() => {
                   const searchQuery = draftsSearch.trim().toLowerCase();
-                  const universities = universityOptions(drafts);
-                  // Status counts follow the chosen university, so "Approved (3)" means 3 of its pages.
-                  const draftsForUniversity = drafts.filter(d => draftMatchesUniversity(d, draftsUniversityFilter));
-                  const filteredDrafts = draftsForUniversity
-                    .filter(d => draftMatchesFilter(d, draftsStatusFilter) && draftMatchesSearch(d, searchQuery))
+                  const columns = buildDraftColumns({
+                    title: getDraftListTitle, isUntitled: isUntitledDraft, isDuplicate: isDuplicateDraft, isRepeated: isRepeatedDraft,
+                    ownerId: ownerIdOf, ownerName: ownerNameOf, statusLabels: DRAFT_STATUS_LABELS,
+                    pageTypeLabel: (type) => SCHEMA_DETAILS[type]?.title || type, now: new Date()
+                  });
+                  // The Status column's dropdown and the status buttons are one filter; the buttons
+                  // also offer "Duplicates", which the Status column doesn't.
+                  const columnFilterValues = { ...draftColumnFilters, status: STATUS_COLUMN_KEYS.includes(draftsStatusFilter) ? draftsStatusFilter : ALL };
+                  const searched = drafts.filter(d => draftMatchesSearch(d, searchQuery));
+                  // Each dropdown counts what passes every OTHER filter (and the search), so its numbers
+                  // say what choosing that option would show.
+                  const optionsFor = (columnId) => columnOptionsWithChoice(
+                    drafts, searched.filter(d => matchesOtherColumns(d, columns, columnFilterValues, columnId)),
+                    columns.find(c => c.id === columnId), columnFilterValues[columnId]
+                  );
+                  const draftsForStatusButtons = searched.filter(d => matchesOtherColumns(d, columns, columnFilterValues, 'status'));
+                  const anyFilterActive = !!searchQuery || draftsStatusFilter !== 'all' || Object.values(draftColumnFilters).some(v => v !== ALL);
+                  const clearAllFilters = () => { setDraftColumnFilters(EMPTY_COLUMN_FILTERS); setDraftsStatusFilter('all'); setDraftsSearch(''); };
+                  const setColumnFilter = (columnId) => (picked) => {
+                    const value = picked || ALL;
+                    if (columnId === 'status') setDraftsStatusFilter(value);
+                    else setDraftColumnFilters(prev => ({ ...prev, [columnId]: value }));
+                  };
+                  const filteredDrafts = draftsForStatusButtons
+                    .filter(d => draftMatchesFilter(d, draftsStatusFilter))
                     .sort((a, b) => (needsMyAttention(b) - needsMyAttention(a)) || (new Date(b.updated_at) - new Date(a.updated_at)));
 
                   // Counted over every draft (not the filtered view) so the numbers stay put while
@@ -1930,24 +1964,19 @@ function ContentStudioApp() {
                       <span className={duplicateCount > 0 ? 'text-danger' : 'text-muted'}><span className="font-bold">{duplicateCount}</span> duplicate{duplicateCount === 1 ? '' : 's'}</span>
                       <span className="text-muted"><span className="font-bold text-navy">{untitledCount}</span> untitled</span>
                       <span className="text-muted/70">{drafts.length} drafts total</span>
+                      {anyFilterActive && (
+                        <span className="ml-auto flex items-center gap-2">
+                          <span className="font-semibold text-navy">Showing {filteredDrafts.length} of {drafts.length}</span>
+                          <button type="button" onClick={clearAllFilters} className="font-bold text-orange hover:text-orange-hover">
+                            Clear filters
+                          </button>
+                        </span>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 mb-5">
-                      <select
-                        value={draftsUniversityFilter}
-                        onChange={(e) => setDraftsUniversityFilter(e.target.value)}
-                        aria-label="Filter by university"
-                        className={`text-xs font-bold pl-3 pr-8 py-1.5 rounded-full border transition-all max-w-[16rem] truncate focus:outline-none focus:ring-2 focus:ring-navy/15 ${
-                          draftsUniversityFilter === 'all' ? 'bg-off text-muted border-transparent hover:text-navy' : 'bg-navy text-white border-navy'
-                        }`}
-                      >
-                        <option value="all">All universities ({drafts.length})</option>
-                        {universities.map(u => (
-                          <option key={u.key} value={u.key}>{u.label} ({u.count})</option>
-                        ))}
-                      </select>
                       {DRAFT_FILTER_KEYS.map(s => {
-                        const count = draftsForUniversity.filter(d => draftMatchesFilter(d, s)).length;
+                        const count = draftsForStatusButtons.filter(d => draftMatchesFilter(d, s)).length;
                         const active = draftsStatusFilter === s;
                         return (
                           <button
@@ -1965,45 +1994,18 @@ function ContentStudioApp() {
                   </>
                 )}
 
-                {filteredDrafts.length === 0 ? (
+                {drafts.length === 0 ? (
                   <div className="py-16 text-center">
                     <div className="w-12 h-12 rounded-full bg-navy-soft flex items-center justify-center mx-auto mb-3">
                       <History className="w-5 h-5 text-navy/50" />
                     </div>
-                    {drafts.length === 0 ? (
-                      <>
-                        <p className="text-sm text-navy font-semibold">No saved drafts yet</p>
-                        <button
-                          onClick={() => setHomeTab('create')}
-                          className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
-                        >
-                          Pick a template to start writing →
-                        </button>
-                      </>
-                    ) : searchQuery ? (
-                      <>
-                        <p className="text-sm text-navy font-semibold">No draft found for "{draftsSearch.trim()}"</p>
-                        <p className="text-xs text-muted mt-1 max-w-sm mx-auto">
-                          Nothing with that name exists yet{draftsStatusFilter !== 'all' ? ' under this filter' : ''} - it hasn't been started, so it still needs editing.
-                        </p>
-                        <button
-                          onClick={() => { setDraftsSearch(''); setDraftsStatusFilter('all'); }}
-                          className="text-xs text-orange font-bold uppercase tracking-wide mt-3 hover:text-orange-hover"
-                        >
-                          Clear search →
-                        </button>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-sm text-navy font-semibold">No drafts in this view</p>
-                        <button
-                          onClick={() => setDraftsStatusFilter('all')}
-                          className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
-                        >
-                          Clear filter →
-                        </button>
-                      </>
-                    )}
+                    <p className="text-sm text-navy font-semibold">No saved drafts yet</p>
+                    <button
+                      onClick={() => setHomeTab('create')}
+                      className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
+                    >
+                      Pick a template to start writing →
+                    </button>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -2021,17 +2023,53 @@ function ContentStudioApp() {
                               />
                             </th>
                           )}
-                          <th className="py-3 px-4">University Name</th>
-                          <th className="py-3 px-4">Page Type</th>
-                          <th className="py-3 px-4">Page/Spec Title</th>
-                          <th className="py-3 px-4">Intern</th>
-                          <th className="py-3 px-4">Duplicate Check</th>
-                          <th className="py-3 px-4">Status</th>
-                          <th className="py-3 px-4">Last Edited</th>
-                          <th className="py-3 px-4 text-right">Actions</th>
+                          {DRAFT_TABLE_COLUMNS.map(col => (
+                            <th key={col.id} className="py-3 px-4 align-top">
+                              <ColumnFilter
+                                label={col.label}
+                                allLabel={col.allLabel}
+                                value={columnFilterValues[col.id]}
+                                options={optionsFor(col.id)}
+                                onChange={setColumnFilter(col.id)}
+                              />
+                            </th>
+                          ))}
+                          <th className="py-3 px-4 text-right align-top">Actions</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border">
+                        {/* Nothing matches: the row sits inside the table so its column dropdowns stay
+                            on screen and one of them can be changed, rather than starting over. */}
+                        {filteredDrafts.length === 0 && (
+                          <tr>
+                            <td colSpan={DRAFT_TABLE_COLUMNS.length + (currentUser.role === 'admin' ? 2 : 1)} className="py-12 text-center">
+                              {searchQuery ? (
+                                <>
+                                  <p className="text-sm text-navy font-semibold">No draft found for "{draftsSearch.trim()}"</p>
+                                  <p className="text-xs text-muted mt-1 max-w-sm mx-auto">
+                                    Nothing with that name exists yet{draftsStatusFilter !== 'all' ? ' under this filter' : ''} - it hasn't been started, so it still needs editing.
+                                  </p>
+                                  <button
+                                    onClick={clearAllFilters}
+                                    className="text-xs text-orange font-bold uppercase tracking-wide mt-3 hover:text-orange-hover"
+                                  >
+                                    {anyFilterActive && (draftsStatusFilter !== 'all' || Object.values(draftColumnFilters).some(v => v !== ALL)) ? 'Clear search and filters →' : 'Clear search →'}
+                                  </button>
+                                </>
+                              ) : (
+                                <>
+                                  <p className="text-sm text-navy font-semibold">No drafts in this view</p>
+                                  <button
+                                    onClick={clearAllFilters}
+                                    className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
+                                  >
+                                    Clear filters →
+                                  </button>
+                                </>
+                              )}
+                            </td>
+                          </tr>
+                        )}
                         {filteredDrafts.map(draft => (
                           <tr
                             key={draft.id}
