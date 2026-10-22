@@ -12,7 +12,7 @@ import https from 'node:https';
 import express from 'express';
 import { config } from '../server/config.js';
 import { publishDraftToWordPress, __clearWordPressCachesForTests, __setChallengeRetryDelayForTests } from '../server/integrations/wordpressClient.js';
-import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost } from '../server/integrations/wordpressAcf.js';
+import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure } from '../server/integrations/wordpressAcf.js';
 import { transformToACF } from '../src/config/schemas.js';
 import { startTestApp, completeSpecializationFormData } from './helpers/testApp.js';
 
@@ -127,7 +127,8 @@ function fullSpecialization() {
     exam_content: '<p>Exams are held online.</p>',
     admission_steps_list: [{ step_title: 'Apply', step_description: 'Fill the form' }],
     placement_stats: [{ stat_label: 'Hiring partners', stat_value: '300+' }],
-    certificate_heading: 'Your Certificate'
+    certificate_heading: 'Your Certificate',
+    emi_amount: 'INR 6,917 /-'
   });
 }
 
@@ -168,6 +169,9 @@ test("a fully filled specialization passes the site's own field rules: created a
   assert.deepEqual(stored.acf.fee_plans, [{ plan_name: 'Semester Plan', plan_amount: 'INR 24,750' }, { plan_name: 'One-time payment', plan_amount: 'INR 94,000' }]);
   assert.equal(stored.acf.semester_plan_value, 'INR 24,750');
   assert.equal(stored.acf['one-time_payment_value'], 'INR 94,000');
+  // The No-Cost EMI box ("Starting from ₹ ... /month") reads its own field; it gets the bare figure.
+  assert.equal(stored.acf.emi_amount, 'INR 6,917 /-');
+  assert.equal(stored.acf.specialization_lowest_emi_strats_from, '6,917');
 
   // What has nowhere to go is reported, not sent.
   const skipped = result.skipped.join(' | ');
@@ -232,6 +236,14 @@ test("the schema check leaves out what still doesn't fit instead of breaking the
   assert.deepEqual(fields.faqs, [{ question: 'Q', answer: 'A' }], 'unknown column dropped, empty row dropped');
   assert.ok(!('made_up_field' in fields) && !('eligibility_content' in fields) && !('linked_university' in fields));
   assert.match(skipped.join(' | '), /made_up_field.*faqs\[0\]\.extra_column.*eligibility_content.*linked_university/);
+});
+
+test('the EMI figure is just the amount', () => {
+  assert.equal(emiFigure('INR 6,917 /-'), '6,917');
+  assert.equal(emiFigure('₹5,725/month'), '5,725');
+  assert.equal(emiFigure('Starts at 4999.50 per month'), '4999.50');
+  assert.equal(emiFigure('No-cost EMI available'), '');
+  assert.equal(emiFigure(''), '');
 });
 
 test('eligibility rich text, syllabus and linked-post helpers', () => {

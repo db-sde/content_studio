@@ -12,7 +12,7 @@ import { getFieldRecordsByDraft } from '../repositories/fieldRecordsRepo.js';
 import { computeCostUsdForUsage, usdToInr } from '../ai/pricing.js';
 import { canEditFieldServer } from '../utils/serverPermissions.js';
 import { validateFactsOnly, validateState, transformToACF } from '../../src/config/schemas.js';
-import { createNotification } from '../repositories/notificationsRepo.js';
+import { createNotification, listDraftRemarks } from '../repositories/notificationsRepo.js';
 import { publishDraftToWordPress } from '../integrations/wordpressClient.js';
 import { generateImages, getGenerationStatus, getImageHistory, regenerateImage, getCurrentPrompt, patchPrompt, deleteImage } from '../integrations/imagePipelineClient.js';
 import { upsertDirectoryEntry } from '../repositories/directoryRepo.js';
@@ -488,6 +488,12 @@ draftsRouter.get('/:id/full-export', asyncRoute(async (req, res) => {
     evaluationLogs: await getEvaluationLogsByDraft(draft.id),
     fieldRecords: await getFieldRecordsByDraft(draft.id)
   });
+}));
+
+// The page's remarks history (see listDraftRemarks). Fetched when a draft is opened, never polled.
+draftsRouter.get('/:id/remarks', asyncRoute(async (req, res) => {
+  const draft = await loadDraftOr404(req.params.id);
+  res.json({ remarks: await listDraftRemarks(draft.id) });
 }));
 
 // Real running total, computed on-demand from this draft's actual generation/evaluation rows —

@@ -8,6 +8,7 @@ import {
 import { canEditField, getLockReason } from '../src/utils/permissions.js';
 import { isUserActive, IDLE_AFTER_MS, POLL_INTERVAL_MS, LIST_POLL_INTERVAL_MS, SLOW_POLL_INTERVAL_MS } from '../src/utils/useActivePolling.js';
 import { NOTIFICATION_TYPE_VERBS } from '../src/utils/notificationFormat.js';
+import { universityKey, universityOptions, NO_UNIVERSITY } from '../src/utils/universityFilter.js';
 
 test('headings: first letter of every word capitalised, acronyms and apostrophes untouched', () => {
   assert.equal(toTitleCase('about the program'), 'About The Program');
@@ -84,4 +85,15 @@ test('polling intervals never drop back below what the database budget was sized
 
 test('every notification type has wording', () => {
   for (const [type, verb] of Object.entries(NOTIFICATION_TYPE_VERBS)) assert.ok(verb && verb.length > 2, type);
+});
+
+test('university filter: spellings that differ only in case or punctuation are one university', () => {
+  const drafts = [
+    { university_name: 'Jain University Online' }, { university_name: 'JAIN University  Online' },
+    { university_name: 'Jain University Online' }, { university_name: 'NMIMS' }, { university_name: '' }, {}
+  ];
+  const options = universityOptions(drafts);
+  assert.deepEqual(options.map(o => [o.label, o.count]), [['Jain University Online', 3], ['NMIMS', 1], ['No university yet', 2]]);
+  assert.equal(universityKey('JAIN University  Online'), universityKey('jain university online'));
+  assert.equal(universityKey('   '), NO_UNIVERSITY);
 });

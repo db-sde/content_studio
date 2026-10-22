@@ -122,6 +122,11 @@ export function getFullExport(id) {
   return getJSON(`/api/drafts/${id}/full-export`);
 }
 
+// Every note left on this draft at a hand-off, newest first (see RemarksPanel).
+export function getDraftRemarks(id) {
+  return getJSON(`/api/drafts/${id}/remarks`);
+}
+
 export function getCostSummary(id) {
   return getJSON(`/api/drafts/${id}/cost-summary`);
 }

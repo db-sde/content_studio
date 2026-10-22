@@ -161,3 +161,24 @@ test('approved drafts cannot be reassigned', async () => {
   await t.query("UPDATE drafts SET status = 'approved' WHERE id = $1", [id]);
   assert.equal((await t.api(S, 'PATCH', `/api/drafts/${id}/assign`, { userId: B.id })).status, 409);
 });
+
+// A reviewer's "sent back" remarks used to vanish for them once the intern returned the page: the
+// note shown on a page came from the viewer's own notifications, and theirs went to the intern.
+test("a page's remarks stay with the page, for everyone, after it comes back", async () => {
+  const id = await newDraft(A, filled);
+  await makeComplete(id);
+  await t.api(A, 'PATCH', `/api/drafts/${id}/status`, { action: 'send-to-senior', message: 'first pass done' });
+  await t.api(S, 'PATCH', `/api/drafts/${id}/status`, { action: 'revert-to-intern', message: 'Fix the fee table\nand the FAQs' });
+  await t.api(A, 'PATCH', `/api/drafts/${id}/status`, { action: 'send-to-senior' }); // no note this time
+  await t.api(A, 'PATCH', `/api/drafts/${id}/status`, { action: 'send-to-senior', message: 'ignored: not allowed twice' });
+
+  for (const viewer of [S, A, B]) {
+    const r = await t.api(viewer, 'GET', `/api/drafts/${id}/remarks`);
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.remarks.map(x => [x.type, x.message, x.created_by_name]), [
+      ['reverted_to_intern', 'Fix the fee table\nand the FAQs', 'Senior S'],
+      ['sent_to_senior', 'first pass done', 'Intern A']
+    ], 'newest first, only hand-offs that carried a note, the same for every viewer');
+  }
+  assert.equal((await t.api(S, 'GET', '/api/drafts/draft_404/remarks')).status, 404);
+});

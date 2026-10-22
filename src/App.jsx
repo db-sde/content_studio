@@ -26,6 +26,8 @@ import {
 import { AiFieldToolbar } from './components/AiFieldToolbar';
 import { AssignInternMenu } from './components/AssignInternMenu';
 import { InvitePanel } from './components/InvitePanel';
+import { RemarksPanel } from './components/RemarksPanel';
+import { universityKey, universityOptions } from './utils/universityFilter';
 import { NotificationsPanel } from './components/NotificationsPanel';
 import { ImageGenerationPanel } from './components/ImageGenerationPanel';
 import { StandaloneImageGeneratorPanel } from './components/StandaloneImageGeneratorPanel';
@@ -104,6 +106,7 @@ const ownerIdOf = (draft) => draft.owner_user_id ?? draft.created_by_user_id;
 const ownerNameOf = (draft) => draft.owner_name ?? draft.created_by_name;
 
 const DRAFT_FILTER_KEYS = ['all', ...ALL_DRAFT_STATUSES, 'sent_back', 'duplicates'];
+
 const DRAFT_FILTER_LABELS = { all: 'All', ...DRAFT_STATUS_LABELS, sent_back: 'Sent Back', duplicates: 'Duplicates' };
 
 // Groups a section's fields into alternating "grid" runs (consecutive short TEXT_INPUT fields,
@@ -307,6 +310,8 @@ function ContentStudioApp() {
   const [statusChipOpenFor, setStatusChipOpenFor] = useState(null);
   // Saved Drafts list filter, available to all three roles — 'all' or one of ALL_DRAFT_STATUSES.
   const [draftsStatusFilter, setDraftsStatusFilter] = useState('all');
+  // University filter on the Saved Drafts list: 'all', NO_UNIVERSITY, or a universityKey().
+  const [draftsUniversityFilter, setDraftsUniversityFilter] = useState('all');
   const [showBulkPasteModal, setShowBulkPasteModal] = useState(false);
   const [bulkPasteResult, setBulkPasteResult] = useState(null);
   const [activeSectionId, setActiveSectionId] = useState(null);
@@ -314,6 +319,9 @@ function ContentStudioApp() {
   const [isTogglingAllowAiEdit, setIsTogglingAllowAiEdit] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  // The open draft's remarks history (RemarksPanel) - loaded when a draft opens or changes stage.
+  // Tagged with its draft so a previous draft's remarks are never shown on the next one.
+  const [draftRemarks, setDraftRemarks] = useState({ draftId: null, remarks: [] });
   const [notificationsLastReadAt, setNotificationsLastReadAt] = useState(null);
   const [showNotificationsPanel, setShowNotificationsPanel] = useState(false);
   const [globalCostSummary, setGlobalCostSummary] = useState(null);
@@ -553,6 +561,8 @@ function ContentStudioApp() {
     return draft.status === filter;
   };
 
+  const draftMatchesUniversity = (draft, filter) => filter === 'all' || universityKey(draft.university_name) === filter;
+
   const draftMatchesSearch = (draft, query) => {
     if (!query) return true;
     const haystack = [
@@ -710,6 +720,17 @@ function ContentStudioApp() {
     // this interval on every keystroke, and the callback reads formDataRef.current instead.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activePageType, activeDraftId]);
+
+  // The open draft's remarks history: loaded when a draft opens and again when it changes stage
+  // (a hand-off is what adds a remark). One small query, never polled.
+  useEffect(() => {
+    if (!activeDraftId) return undefined;
+    let cancelled = false;
+    draftsClient.getDraftRemarks(activeDraftId)
+      .then(({ remarks }) => { if (!cancelled) setDraftRemarks({ draftId: activeDraftId, remarks: remarks || [] }); })
+      .catch(e => console.error('Error loading remarks', e));
+    return () => { cancelled = true; };
+  }, [activeDraftId, draftStatus]);
 
   // Save draft function — hoisted function declaration for the same reason as
   // refreshDraftsList above (safely referenced by the autosave effect regardless of textual order).
@@ -1511,21 +1532,6 @@ function ContentStudioApp() {
     })
   ));
 
-  // Surfaces whoever-handed-off-this-draft's note inline on the form itself (not just in the
-  // notifications panel) — this is exactly the moment the current holder needs that context.
-  // Covers both directions: an Admin/Senior bouncing a draft backward with corrections, and an
-  // Intern/Senior passing a draft forward with a note about what they did. `notifications` is
-  // already sorted newest-first so `.find` gives the latest relevant one for this draft.
-  const INLINE_NOTE_TYPES_BY_STATUS = {
-    intern_editing: ['reverted_to_intern'],
-    senior_review: ['reverted_to_senior', 'sent_to_senior'],
-    admin_review: ['sent_to_admin']
-  };
-  const latestRevertNote = activeDraftId
-    ? notifications.find(n => n.draft_id === activeDraftId && n.message
-        && (INLINE_NOTE_TYPES_BY_STATUS[draftStatus] || []).includes(n.type))
-    : null;
-
   return (
     <div className="min-h-screen bg-off flex flex-col antialiased">
 
@@ -1822,7 +1828,10 @@ function ContentStudioApp() {
               <div className="bg-white border border-border rounded-2xl p-6 shadow-premium">
                 {(() => {
                   const searchQuery = draftsSearch.trim().toLowerCase();
-                  const filteredDrafts = drafts
+                  const universities = universityOptions(drafts);
+                  // Status counts follow the chosen university, so "Approved (3)" means 3 of its pages.
+                  const draftsForUniversity = drafts.filter(d => draftMatchesUniversity(d, draftsUniversityFilter));
+                  const filteredDrafts = draftsForUniversity
                     .filter(d => draftMatchesFilter(d, draftsStatusFilter) && draftMatchesSearch(d, searchQuery))
                     .sort((a, b) => (needsMyAttention(b) - needsMyAttention(a)) || (new Date(b.updated_at) - new Date(a.updated_at)));
 
@@ -1924,8 +1933,21 @@ function ContentStudioApp() {
                     </div>
 
                     <div className="flex flex-wrap items-center gap-1.5 mb-5">
+                      <select
+                        value={draftsUniversityFilter}
+                        onChange={(e) => setDraftsUniversityFilter(e.target.value)}
+                        aria-label="Filter by university"
+                        className={`text-xs font-bold pl-3 pr-8 py-1.5 rounded-full border transition-all max-w-[16rem] truncate focus:outline-none focus:ring-2 focus:ring-navy/15 ${
+                          draftsUniversityFilter === 'all' ? 'bg-off text-muted border-transparent hover:text-navy' : 'bg-navy text-white border-navy'
+                        }`}
+                      >
+                        <option value="all">All universities ({drafts.length})</option>
+                        {universities.map(u => (
+                          <option key={u.key} value={u.key}>{u.label} ({u.count})</option>
+                        ))}
+                      </select>
                       {DRAFT_FILTER_KEYS.map(s => {
-                        const count = drafts.filter(d => draftMatchesFilter(d, s)).length;
+                        const count = draftsForUniversity.filter(d => draftMatchesFilter(d, s)).length;
                         const active = draftsStatusFilter === s;
                         return (
                           <button
@@ -2543,17 +2565,9 @@ function ContentStudioApp() {
             </div>
           )}
 
-          {latestRevertNote && (
-            <div className="bg-info-soft border-b border-info/20 px-6 py-3 flex gap-3 text-sm text-navy">
-              <CornerDownRight className="w-4 h-4 text-info shrink-0 mt-0.5" />
-              <div>
-                <span className="font-bold text-info uppercase tracking-wide text-[10px]">
-                  {latestRevertNote.created_by_name} {latestRevertNote.type.startsWith('reverted_') ? 'sent this back with notes' : 'sent this to you with a note'}
-                </span>
-                <p className="text-xs text-navy/80 mt-0.5">{latestRevertNote.message}</p>
-              </div>
-            </div>
-          )}
+          {/* Every note left on this page at a hand-off - not just the latest one sent to the viewer,
+              so a reviewer still sees their own "sent back" remarks when the page returns to them. */}
+          <RemarksPanel key={activeDraftId} remarks={draftRemarks.draftId === activeDraftId ? draftRemarks.remarks : []} />
 
           {/* Form Workspace Container */}
           <div className="flex-1 flex overflow-hidden">

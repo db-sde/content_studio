@@ -115,6 +115,9 @@ const remapRows = (wpKey, keyMap) => (rows) => ({
 });
 const eligibilityRows = (rows) => ({ eligibility_content: htmlToRows(rows, 'eligibility_title', 'eligibility_description') });
 
+// "INR 6,917 /-" -> "6,917" (the first amount in the text; '' if there is none).
+export const emiFigure = (value) => (/\d[\d,]*(?:\.\d+)?/.exec(htmlToText(value)) || [''])[0];
+
 const FIELD_MAPS = {
   university: {
     facts: toHtmlList('facts_content', 'fact_title', 'fact_description'),
@@ -136,6 +139,10 @@ const FIELD_MAPS = {
     syllabus_subjects: (rows) => ({ course_academic_years: syllabusToYears(rows, { yearTitle: 'course_year_title', semesters: 'course_semesters', semesterTitle: 'course_semester_title', semesterSubjects: 'course_semester_subjects' }) })
   },
   specialization: {
+    // The page shows EMI twice: "EMI From <emi_amount>" at the top, and a No-Cost EMI box reading
+    // "Starting from ₹ <specialization_lowest_emi_strats_from> /month" - which stayed blank because
+    // nothing filled that field. Same figure; the box adds the ₹ and /month itself, so just the number.
+    emi_amount: (value) => ({ emi_amount: value, specialization_lowest_emi_strats_from: emiFigure(value) }),
     highlights: toHtmlList('highlights_content', 'highlight_title', 'highlight_description'),
     eligibility_content: eligibilityRows,
     exam_content: rename('examination_content'),

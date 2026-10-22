@@ -25,6 +25,24 @@ export async function createNotification({ draftId, type, message, createdByUser
   `, [draftId, type, message || null, createdByUserId, recipientRole || null, recipientUserId || null]);
 }
 
+// Every note written on this draft at a hand-off (sent on, sent back), newest first, whoever wrote
+// it and whoever it went to. The notification itself is addressed to one person or role, so a
+// reviewer used to lose sight of their own "sent back" remarks the moment the draft came back to
+// them; this is the page's own history instead, the same for everyone who opens it.
+export async function listDraftRemarks(draftId) {
+  const db = await getDb();
+  const { rows } = await db.query(`
+    SELECT notifications.id, notifications.type, notifications.message, notifications.created_at,
+           users.name AS created_by_name, users.role AS created_by_role
+    FROM notifications
+    JOIN users ON users.id = notifications.created_by_user_id
+    WHERE notifications.draft_id = $1 AND notifications.message IS NOT NULL AND btrim(notifications.message) <> ''
+    ORDER BY notifications.id DESC
+    LIMIT 100
+  `, [draftId]);
+  return rows;
+}
+
 // A notification reaches a user if it's addressed to them directly (a specific revert) or
 // broadcast to their role (any Senior, for a newly-submitted draft). Joins in enough of the
 // draft/author to render a feed item without a second round-trip per row.
