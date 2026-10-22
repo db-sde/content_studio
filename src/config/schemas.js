@@ -274,7 +274,13 @@ export const schemas = {
         title: 'Accreditations',
         icon: 'Award',
         fields: [
-          { key: 'accreditations_heading', type: 'TEXT_INPUT', label: 'Accreditations Section Heading', placeholder: 'e.g. Accreditations' }
+          { key: 'accreditations_heading', type: 'TEXT_INPUT', label: 'Accreditations Section Heading', placeholder: 'e.g. Accreditations' },
+          // Keys match the course page's own ACF fields on WordPress, so these publish as they are.
+          { key: 'course_accreditations', type: 'REPEATER', label: 'Accreditations', subfields: [
+            { key: 'course_body_name', label: 'Body Name', type: 'text', placeholder: 'e.g. NAAC' },
+            { key: 'course_body_descriptor', label: 'Grade / Status', type: 'text', placeholder: 'e.g. A+ Grade' },
+            { key: 'course_body_detail', label: 'Description', type: 'textarea', rows: 2, placeholder: 'e.g. Accredited with A+ by the National Assessment and Accreditation Council' }
+          ] }
         ]
       },
       {
@@ -283,7 +289,11 @@ export const schemas = {
         icon: 'Table',
         fields: [
           { key: 'specializations_heading', type: 'TEXT_INPUT', label: 'Specializations Section Heading', placeholder: 'e.g. Available Specializations' },
-          { key: 'specializations_intro', type: 'TEXT_INPUT', label: 'Specializations Intro', placeholder: 'Short intro line above specializations' }
+          { key: 'specializations_intro', type: 'TEXTAREA', label: 'Specializations Intro', rows: 3, placeholder: 'A short intro shown above the list of specializations' },
+          { key: 'specialization', type: 'REPEATER', label: 'Specializations', subfields: [
+            { key: 'specialization_name', label: 'Specialization', type: 'text', placeholder: 'e.g. Data Science' },
+            { key: 'specialization_details', label: 'Description', type: 'textarea', rows: 2, placeholder: 'What this specialization covers' }
+          ] }
         ]
       },
       {
