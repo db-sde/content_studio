@@ -148,12 +148,12 @@ test('the program a title belongs to', () => {
   assert.equal(programOf('Master of Business Administration'), 'Master of Business Administration');
 });
 
-test('course pages have room to describe each accreditation and specialization, under the site\'s own field names', async () => {
+test('course pages: a description per accreditation, a fee per specialization, under the site\'s own field names', async () => {
   const { schemas } = await import('../src/config/schemas.js');
   const fields = Object.fromEntries(schemas.course.sections.flatMap(sec => sec.fields).map(f => [f.key, f]));
   assert.deepEqual(fields.course_accreditations.subfields.map(f => f.key), ['course_body_name', 'course_body_descriptor', 'course_body_detail']);
   assert.deepEqual(fields.specialization.subfields.map(f => f.key), ['specialization_name', 'specialization_details']);
   assert.equal(fields.course_accreditations.subfields[2].type, 'textarea');
-  assert.equal(fields.specialization.subfields[1].type, 'textarea');
+  assert.deepEqual([fields.specialization.subfields[1].label, fields.specialization.subfields[1].type], ['Fee', 'text'], "each specialization's fee, in the row's one text field on WordPress");
   assert.equal(fields.specializations_intro.type, 'TEXTAREA');
 });

@@ -290,9 +290,11 @@ export const schemas = {
         fields: [
           { key: 'specializations_heading', type: 'TEXT_INPUT', label: 'Specializations Section Heading', placeholder: 'e.g. Available Specializations' },
           { key: 'specializations_intro', type: 'TEXTAREA', label: 'Specializations Intro', rows: 3, placeholder: 'A short intro shown above the list of specializations' },
+          // Each specialization's fee. On WordPress a specialization row has only a name and one text
+          // field, specialization_details, so that is where the fee goes.
           { key: 'specialization', type: 'REPEATER', label: 'Specializations', subfields: [
             { key: 'specialization_name', label: 'Specialization', type: 'text', placeholder: 'e.g. Data Science' },
-            { key: 'specialization_details', label: 'Description', type: 'textarea', rows: 2, placeholder: 'What this specialization covers' }
+            { key: 'specialization_details', label: 'Fee', type: 'text', placeholder: 'e.g. INR 24,750/- per semester' }
           ] }
         ]
       },

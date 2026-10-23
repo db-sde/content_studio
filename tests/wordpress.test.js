@@ -199,7 +199,7 @@ test("course and university fields map onto the site's own (and pass its field r
     admission_steps_list: [{ step_title: 'x', step_description: 'y' }],
     course_accreditations: [{ course_body_name: 'NAAC', course_body_descriptor: 'A+ Grade', course_body_detail: 'Accredited with A+' }],
     specializations_intro: 'Choose from several specializations.\nEach has its own fee.',
-    specialization: [{ specialization_name: 'Data Science', specialization_details: 'Python, ML' }, { specialization_name: 'Cloud', specialization_details: '' }],
+    specialization: [{ specialization_name: 'Data Science', specialization_details: 'INR 24,750/- per semester' }, { specialization_name: 'Cloud', specialization_details: '' }],
     num_specializations: '8'
   }, 'course');
   const c = conformToSchema(course.fields, SCHEMAS.course);
@@ -208,9 +208,9 @@ test("course and university fields map onto the site's own (and pass its field r
   assert.deepEqual(c.fields.eligibility_content, [{ eligibility_title: 'Graduation', eligibility_description: 'any stream' }]);
   assert.deepEqual(c.fields.course_academic_years, [{ course_year_title: 'Year 1', course_semesters: [{ course_semester_title: 'Year 1', course_semester_subjects: '<ul><li>C</li></ul>' }] }]);
   assert.equal(c.fields.annual_plan_amount, '50,000');
-  // Accreditations and specializations (with a description each) publish under the site's own fields.
+  // Accreditations (with a description each) and specializations (with a fee each) publish under the site's own fields.
   assert.deepEqual(c.fields.course_accreditations, [{ course_body_name: 'NAAC', course_body_descriptor: 'A+ Grade', course_body_detail: 'Accredited with A+' }]);
-  assert.deepEqual(c.fields.specialization, [{ specialization_name: 'Data Science', specialization_details: 'Python, ML' }, { specialization_name: 'Cloud', specialization_details: '' }]);
+  assert.deepEqual(c.fields.specialization, [{ specialization_name: 'Data Science', specialization_details: 'INR 24,750/- per semester' }, { specialization_name: 'Cloud', specialization_details: '' }]);
   assert.equal(c.fields.num_specializations, '8', 'the number the intern typed, not the length of the list');
   assert.equal(c.fields.specializations_intro, 'Choose from several specializations.\nEach has its own fee.');
   assert.match(c.skipped.join(' | '), /admission_steps_list \(no such field in WordPress\)/);
