@@ -591,6 +591,17 @@ Object.values(schemas).forEach(schema => {
   });
 });
 
+// University pages arrive from the content team with every section already written (the
+// University Page docs), so interns may type or paste into the AI fields there too - the AI fills
+// only the ones left empty ("Generate Empty Fields"). On course and specialization pages the AI
+// writes these fields and they stay locked for interns unless a Senior turns on "Intern AI Edit".
+// Read by canEditField (src/utils/permissions.js) and canEditFieldServer, so both agree.
+schemas[PAGE_TYPES.UNIVERSITY].sections.forEach(section => {
+  section.fields.forEach(field => {
+    if (field.aiAssist) field.internWritable = true;
+  });
+});
+
 // Derive display metadata (field counts) directly from the schemas above so it can never drift
 const countFields = (schema) => schema.sections.reduce((sum, sec) => sum + sec.fields.length, 0);
 

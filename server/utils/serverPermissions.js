@@ -25,6 +25,6 @@ export function canEditFieldServer(pageType, fieldKey, { role, draftStatus, allo
   if (!internHasTurn) return false;
 
   const field = findField(pageType, fieldKey);
-  if (field?.aiAssist) return !!allowInternAiEdit;
+  if (field?.aiAssist && !field.internWritable) return !!allowInternAiEdit;
   return true;
 }

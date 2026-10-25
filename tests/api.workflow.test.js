@@ -182,3 +182,17 @@ test("a page's remarks stay with the page, for everyone, after it comes back", a
   }
   assert.equal((await t.api(S, 'GET', '/api/drafts/draft_404/remarks')).status, 404);
 });
+
+// University docs come with every section written, so an intern can paste into a University page's
+// AI fields - and the server keeps it. On other page types the AI fields stay locked for interns.
+test("an intern's text in a University page's AI fields is saved; on a specialization it is not", async () => {
+  const { body: uni } = await t.api(A, 'POST', '/api/drafts', { pageType: 'university' });
+  const saved = await t.api(A, 'PUT', `/api/drafts/${uni.draft.id}`, { formData: { university_name: 'Test University Online', about_content: '<p>Pasted from the doc.</p>' } });
+  assert.equal(saved.body.draft.form_data.about_content, '<p>Pasted from the doc.</p>');
+  assert.equal(saved.body.skippedKeys, undefined);
+
+  const { body: spec } = await t.api(A, 'POST', '/api/drafts', { pageType: 'specialization' });
+  const blocked = await t.api(A, 'PUT', `/api/drafts/${spec.draft.id}`, { formData: { spec_name: 'Online MBA', about_content: '<p>Typed by the intern.</p>' } });
+  assert.deepEqual(blocked.body.skippedKeys, ['about_content']);
+  assert.ok(!blocked.body.draft.form_data.about_content);
+});

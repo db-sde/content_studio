@@ -7,7 +7,8 @@
 //   approve-and-publish step — never more locked than Senior, never less.
 // - Intern, non-AI field, draft still with the Intern (intern_editing): true.
 // - Intern, AI field: true only if the Senior has explicitly unlocked it for this draft
-//   (allowInternAiEdit) AND the draft is still with the Intern.
+//   (allowInternAiEdit) AND the draft is still with the Intern - except fields marked
+//   internWritable (University pages' AI fields, see schemas.js), which the Intern may always fill.
 // - Intern who isn't this draft's owner (isDraftOwner false): always false - they can read it, not edit it.
 // - Anything else (draft in senior_review/admin_review/approved, etc.): false for the Intern.
 export function canEditField(field, { role, draftStatus, allowInternAiEdit, isDraftOwner = true }) {
@@ -19,7 +20,7 @@ export function canEditField(field, { role, draftStatus, allowInternAiEdit, isDr
   const internHasTurn = draftStatus === 'intern_editing';
   if (!internHasTurn) return false;
 
-  if (field.aiAssist) return !!allowInternAiEdit;
+  if (field.aiAssist && !field.internWritable) return !!allowInternAiEdit;
   return true;
 }
 
@@ -32,6 +33,6 @@ export function getLockReason(field, { role, draftStatus, allowInternAiEdit, isD
   if (!isDraftOwner) return 'Assigned to another intern';
   if (draftStatus === 'admin_review') return 'With Admin for review';
   if (draftStatus !== 'intern_editing') return 'With Senior for review';
-  if (field.aiAssist && !allowInternAiEdit) return 'AI-generated field';
+  if (field.aiAssist && !field.internWritable && !allowInternAiEdit) return 'AI-generated field';
   return null;
 }

@@ -68,6 +68,12 @@ test('editing permissions: seniors/admins always; interns only their own draft, 
   assert.ok(!canEditField(plain, ctx({ draftStatus: 'senior_review' })));
   assert.ok(!canEditField(ai, ctx({})));
   assert.ok(canEditField(ai, ctx({ allowInternAiEdit: true })));
+  // University pages: the AI fields come already written in the docs, so interns can fill them.
+  const uniAi = { key: 'about_content', aiAssist: {}, internWritable: true };
+  assert.ok(canEditField(uniAi, ctx({})));
+  assert.equal(getLockReason(uniAi, ctx({})), null);
+  assert.ok(!canEditField(uniAi, ctx({ draftStatus: 'senior_review' })), 'still only while the draft is with the intern');
+  assert.ok(!canEditField(uniAi, ctx({ isDraftOwner: false })), 'and only on their own draft');
 });
 
 test('polling only happens for a visible tab whose user is around', () => {
