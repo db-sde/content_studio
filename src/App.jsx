@@ -1,4 +1,4 @@
-import { useState, useEffect, useReducer, useRef, useCallback } from 'react';
+import { useState, useEffect, useReducer, useRef, useCallback, useMemo } from 'react';
 import {
   schemas,
   PAGE_TYPES,
@@ -41,7 +41,7 @@ import { useActivePolling, POLL_INTERVAL_MS, LIST_POLL_INTERVAL_MS, SLOW_POLL_IN
 import * as draftsClient from './services/draftsClient';
 import * as notificationsClient from './services/notificationsClient';
 import { canEditField, getLockReason } from './utils/permissions';
-import { normalizeKey, parseBulkPasteLines, extractRepeaterBlocks } from './utils/pasteParsing';
+import { normalizeKey, parseBulkPasteLines, extractRepeaterBlocks, fieldNamesOf } from './utils/pasteParsing';
 import { useAuth } from './context/AuthContext';
 import { useToast } from './context/ToastContext';
 import { BootstrapScreen } from './screens/BootstrapScreen';
@@ -335,6 +335,10 @@ function ContentStudioApp() {
   const [isTogglingAllowAiEdit, setIsTogglingAllowAiEdit] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  // This page type's field names - lets a single field tell a multi-field paste from ordinary text
+  // (see useFieldPaste in components/FieldTypes.jsx).
+  const pasteFieldNames = useMemo(() => fieldNamesOf(schemas[activePageType]), [activePageType]);
+
   // The open draft's remarks history (RemarksPanel) - loaded when a draft opens or changes stage.
   // Tagged with its draft so a previous draft's remarks are never shown on the next one.
   const [draftRemarks, setDraftRemarks] = useState({ draftId: null, remarks: [] });
@@ -2692,6 +2696,7 @@ function ContentStudioApp() {
                         <TextInput
                           label={field.label}
                           fieldKey={key}
+                          pasteFieldNames={pasteFieldNames}
                           placeholder={field.placeholder}
                           required={field.required}
                           value={value}
@@ -2706,6 +2711,7 @@ function ContentStudioApp() {
                         <TextArea
                           label={field.label}
                           fieldKey={key}
+                          pasteFieldNames={pasteFieldNames}
                           placeholder={field.placeholder}
                           required={field.required}
                           rows={field.rows}
@@ -2736,6 +2742,7 @@ function ContentStudioApp() {
                         <RichText
                           label={field.label}
                           fieldKey={key}
+                          pasteFieldNames={pasteFieldNames}
                           placeholder={field.placeholder}
                           required={field.required}
                           value={value}

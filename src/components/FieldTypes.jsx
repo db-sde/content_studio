@@ -7,29 +7,36 @@ import {
   Bold, Italic, List, ListOrdered, Heading2, Heading3, Link as LinkIcon,
   Trash2, Plus, X, Search, PenLine
 } from 'lucide-react';
-import { parseRepeaterPasteText, extractSingleFieldValue } from '../utils/pasteParsing';
+import { parseRepeaterPasteText, decideFieldPaste, decideSubfieldPaste } from '../utils/pasteParsing';
 import { defaultSemesterLabel, isGeneratedSemesterLabel } from '../config/schemas';
 
-// Shared by TextInput/TextArea's onPaste below — a plain single-value paste (the common "copied
-// just this one cell/value" case) is let through untouched; anything that looks like a bigger,
-// multi-field blob gets scoped to just this field's own matching value (or ignored entirely if
-// nothing matches), so pasting a big table onto one field can never leak other fields' content
-// into it. Plain helper (not a hook) despite the "make a handler" shape — no hook calls inside.
-function makeScopedPasteHandler({ fieldKey, label, onChange }) {
-  return (e) => {
-    const text = (e.clipboardData || window.clipboardData).getData('text');
-    const trimmed = text.trim();
-    const looksStructured = /\r?\n/.test(trimmed) || /^[^:=\t]+[:=\t]/.test(trimmed);
-    if (!looksStructured) return; // let the default single-value paste happen
+const MULTI_FIELD_PASTE_HINT = 'That looks like several fields at once, so it wasn\'t pasted here - use "Paste Data" at the top to fill them all.';
 
+// Ctrl+V on one text field (see decideFieldPaste): ordinary content pastes normally; a paste of
+// several fields' "Label: value" lines puts only this field's line in, or - if it has none - is held
+// back with a hint pointing to Paste Data, rather than vanishing without a word. `pasteFieldNames`
+// is the page's field names (fieldNamesOf in utils/pasteParsing.js).
+function useFieldPaste({ fieldKey, label, onChange, pasteFieldNames }) {
+  const [hint, setHint] = useState(null);
+  useEffect(() => {
+    if (!hint) return undefined;
+    const timer = setTimeout(() => setHint(null), 8000);
+    return () => clearTimeout(timer);
+  }, [hint]);
+
+  const decide = (text) => decideFieldPaste(text, { fieldKey, label, knownFieldNames: pasteFieldNames });
+  const onPaste = (e) => {
+    const decision = decide((e.clipboardData || window.clipboardData).getData('text'));
+    if (decision.action === 'default') return;
     e.preventDefault();
-    const matched = extractSingleFieldValue(text, { fieldKey, label });
-    if (matched != null) onChange(matched);
+    if (decision.action === 'insert') onChange(decision.value);
+    else setHint(MULTI_FIELD_PASTE_HINT);
   };
+  return { onPaste, decide, hint, setHint };
 }
 
 // Common wrapper for fields to show labels, required indicators, and helper texts
-export const FieldWrapper = ({ label, required, children, error, labelSuffix }) => {
+export const FieldWrapper = ({ label, required, children, error, labelSuffix, notice }) => {
   return (
     <div>
       <div className="flex justify-between items-center mb-1.5">
@@ -40,23 +47,25 @@ export const FieldWrapper = ({ label, required, children, error, labelSuffix }) 
         {labelSuffix && <span className="text-xs text-muted font-medium">{labelSuffix}</span>}
       </div>
       {children}
+      {notice && <p className="mt-1 text-xs text-orange font-medium" role="status">{notice}</p>}
       {error && <p className="mt-1 text-xs text-danger font-medium">{error}</p>}
     </div>
   );
 };
 
 // TEXT_INPUT Field
-export const TextInput = ({ label, placeholder, required, value, onChange, maxLength, error, disabled, labelSuffix, fieldKey }) => {
+export const TextInput = ({ label, placeholder, required, value, onChange, maxLength, error, disabled, labelSuffix, fieldKey, pasteFieldNames }) => {
   const suffix = labelSuffix || (maxLength ? `${(value || '').length}/${maxLength}` : null);
+  const paste = useFieldPaste({ fieldKey, label, onChange, pasteFieldNames });
   return (
-    <FieldWrapper label={label} required={required} error={error} labelSuffix={suffix}>
+    <FieldWrapper label={label} required={required} error={error} labelSuffix={suffix} notice={paste.hint}>
       <input
         type="text"
         placeholder={placeholder}
         maxLength={maxLength}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        onPaste={makeScopedPasteHandler({ fieldKey, label, onChange })}
+        onPaste={paste.onPaste}
         disabled={disabled}
         className={`w-full px-4 py-2.5 rounded-lg border bg-white text-navy placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy transition-all duration-200 text-sm disabled:bg-off disabled:text-muted disabled:cursor-not-allowed ${
           error ? 'border-danger ring-2 ring-danger/10' : 'border-border hover:border-border-strong'
@@ -67,15 +76,16 @@ export const TextInput = ({ label, placeholder, required, value, onChange, maxLe
 };
 
 // TEXTAREA Field
-export const TextArea = ({ label, placeholder, rows = 3, required, value, onChange, error, disabled, labelSuffix, fieldKey }) => {
+export const TextArea = ({ label, placeholder, rows = 3, required, value, onChange, error, disabled, labelSuffix, fieldKey, pasteFieldNames }) => {
+  const paste = useFieldPaste({ fieldKey, label, onChange, pasteFieldNames });
   return (
-    <FieldWrapper label={label} required={required} error={error} labelSuffix={labelSuffix}>
+    <FieldWrapper label={label} required={required} error={error} labelSuffix={labelSuffix} notice={paste.hint}>
       <textarea
         rows={rows}
         placeholder={placeholder}
         value={value || ''}
         onChange={(e) => onChange(e.target.value)}
-        onPaste={makeScopedPasteHandler({ fieldKey, label, onChange })}
+        onPaste={paste.onPaste}
         disabled={disabled}
         className={`w-full px-4 py-2.5 rounded-lg border bg-white text-navy placeholder:text-muted/60 focus:outline-none focus:ring-2 focus:ring-navy/15 focus:border-navy transition-all duration-200 text-sm resize-y disabled:bg-off disabled:text-muted disabled:cursor-not-allowed ${
           error ? 'border-danger ring-2 ring-danger/10' : 'border-border hover:border-border-strong'
@@ -169,7 +179,11 @@ export const SearchableSelect = ({ label, placeholder, required, value, onChange
 };
 
 // RICH_TEXT Field (TipTap)
-export const RichText = ({ label, placeholder, required, value, onChange, error, disabled, labelSuffix, fieldKey }) => {
+export const RichText = ({ label, placeholder, required, value, onChange, error, disabled, labelSuffix, fieldKey, pasteFieldNames }) => {
+  const paste = useFieldPaste({ fieldKey, label, onChange, pasteFieldNames });
+  // The editor's paste handler is set up once; it reads the current decision function through a ref.
+  const pasteRef = useRef(paste);
+  useEffect(() => { pasteRef.current = paste; });
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -188,21 +202,16 @@ export const RichText = ({ label, placeholder, required, value, onChange, error,
     content: value || '',
     editable: !disabled,
     editorProps: {
-      // Same scoping as TextInput/TextArea's onPaste — a plain single-value paste is left to
-      // TipTap's own handling (preserves any rich formatting from the clipboard); a structured,
-      // multi-field paste is matched strictly to this field's own key/label and inserted as plain
-      // text at the cursor, or swallowed entirely if nothing matches this field.
+      // Same rule as TextInput/TextArea (useFieldPaste): ordinary content is left to TipTap's own
+      // paste, which keeps paragraphs, lists and formatting from the clipboard.
       handlePaste: (view, event) => {
-        const text = event.clipboardData?.getData('text/plain') || '';
-        const trimmed = text.trim();
-        const looksStructured = /\r?\n/.test(trimmed) || /^[^:=\t]+[:=\t]/.test(trimmed);
-        if (!looksStructured) return false;
-
-        const matched = extractSingleFieldValue(text, { fieldKey, label });
-        if (matched != null) {
+        const decision = pasteRef.current.decide(event.clipboardData?.getData('text/plain') || '');
+        if (decision.action === 'default') return false;
+        if (decision.action === 'insert') {
           const { state, dispatch } = view;
-          const { from, to } = state.selection;
-          dispatch(state.tr.insertText(matched, from, to));
+          dispatch(state.tr.insertText(decision.value, state.selection.from, state.selection.to));
+        } else {
+          pasteRef.current.setHint(MULTI_FIELD_PASTE_HINT);
         }
         return true;
       },
@@ -395,11 +404,9 @@ export const RepeaterBuilder = ({ label, required, value = [], onChange, error, 
   // as needed — mirroring how the standalone "Paste Data" bulk-import works for flat fields.
   const handleSubfieldPaste = (rowIndex, sub, e) => {
     const text = (e.clipboardData || window.clipboardData).getData('text');
-    if (!text.includes('\t') && !/\r?\n/.test(text.trim())) return; // plain single value, let default paste happen
-    // A bullet-list sub-field (Syllabus "Subjects") is meant to hold one item per line, so a
-    // newline-only paste into it is just its own content - only a tab-separated paste (a
-    // spreadsheet row/table) is treated as "explode into several rows".
-    if (sub.outputFormat === 'bullets' && !text.includes('\t')) return;
+    // A spreadsheet copy becomes rows; several lines pasted into a multi-line cell (an FAQ answer,
+    // a review) or a bullet-list cell stay that cell's own text - see decideSubfieldPaste.
+    if (decideSubfieldPaste(text, sub) === 'default') return;
 
     e.preventDefault();
     const parsedRows = parseRepeaterPasteText(text, subfields);

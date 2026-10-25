@@ -157,3 +157,33 @@ test('course pages: a description per accreditation, a fee per specialization, u
   assert.deepEqual([fields.specialization.subfields[1].label, fields.specialization.subfields[1].type], ['Fee', 'text'], "each specialization's fee, in the row's one text field on WordPress");
   assert.equal(fields.specializations_intro.type, 'TEXTAREA');
 });
+
+// Ctrl+V into a single field. An earlier rule treated any paste with a line break or an early colon
+// as a "multi-field blob" and silently dropped it - so on University pages (long About / Why Choose
+// / EMI / Placement text) pasting paragraphs, lists or links did nothing.
+test('pasting into a field: ordinary text goes in; only a real multi-field paste is held back', async () => {
+  const { schemas } = await import('../src/config/schemas.js');
+  const { decideFieldPaste, decideSubfieldPaste, fieldNamesOf } = await import('../src/utils/pasteParsing.js');
+  const names = fieldNamesOf(schemas.university);
+  const about = { fieldKey: 'about_content', label: 'About Content', knownFieldNames: names };
+  const paste = (text, field = about) => decideFieldPaste(text, field);
+
+  assert.deepEqual(paste('NMIMS is a leading university.\n\nIt was founded in 1981 and offers 40+ programs.'), { action: 'default' }, 'paragraphs');
+  assert.deepEqual(paste('• UGC-entitled degree\n• Live weekend classes\n• EMI from ₹5,000'), { action: 'default' }, 'a bulleted list');
+  assert.deepEqual(paste('https://www.nmims.edu/admissions?ref=degreebaba'), { action: 'default' }, 'a link');
+  assert.deepEqual(paste('NMIMS: a leading university with NAAC A++ accreditation'), { action: 'default' }, 'a sentence with a colon');
+  assert.deepEqual(paste('Duration: 2 years\nMode: online'), { action: 'default' }, 'label-like lines that are not this page\'s fields');
+
+  const blob = 'University Name: NMIMS\nEstablished Year: 1981\nNAAC Grade: A++\nAbout Content: NMIMS offers flexible online degrees.';
+  assert.deepEqual(paste(blob), { action: 'insert', value: 'NMIMS offers flexible online degrees.' }, 'a blob with this field: just its line');
+  assert.deepEqual(paste(blob, { fieldKey: 'why_choose_content', label: 'Why Choose Content', knownFieldNames: names }), { action: 'ignore' }, 'a blob without this field: held back (with a hint)');
+  assert.deepEqual(paste('University Name: NMIMS', { fieldKey: 'university_name', label: 'University Name', knownFieldNames: names }), { action: 'insert', value: 'NMIMS' });
+
+  // Lists: a two-paragraph FAQ answer stays one answer; a spreadsheet copy still becomes rows.
+  const answer = { key: 'answer', type: 'textarea' };
+  assert.equal(decideSubfieldPaste('Yes.\n\nThe degree is UGC-entitled and valid for jobs.', answer), 'default');
+  assert.equal(decideSubfieldPaste('Is it valid?\tYes\nIs there EMI?\tYes', answer), 'rows');
+  assert.equal(decideSubfieldPaste('MBA\nMCA\nBBA', { key: 'program_name', type: 'text' }), 'rows', 'a column copied from a sheet');
+  assert.equal(decideSubfieldPaste('Python\nStatistics', { key: 'subjects', type: 'textarea', outputFormat: 'bullets' }), 'default');
+  assert.equal(decideSubfieldPaste('Just one value', { key: 'program_name', type: 'text' }), 'default');
+});

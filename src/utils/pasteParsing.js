@@ -140,22 +140,45 @@ export function extractRepeaterBlocks(text, repeaterFields) {
   return { blocks: populated, remainingText: leftoverLines.join('\n') };
 }
 
-// Powers the per-field "paste corner" on plain text/textarea/rich-text fields — pasting a big,
-// multi-field blob directly onto ONE field must only ever apply that one field's own value, never
-// leak another field's content into it. A plain single-value paste (the common "copied just this
-// cell" case) is returned verbatim so normal paste behavior is unaffected; a structured paste
-// (multiple lines, or a single "key: value"/"key=value" line) is parsed and matched strictly by
-// this field's own key/label, returning null — not a fallback guess — when nothing matches, so the
-// field is left untouched rather than filled with the wrong thing.
-export const extractSingleFieldValue = (text, { fieldKey, label }) => {
-  const trimmed = text.trim();
-  if (!trimmed) return null;
+// What a single field does with a Ctrl+V (TextInput / TextArea / RichText). Returns:
+//   { action: 'default' }        - let the paste happen normally (the usual case);
+//   { action: 'insert', value }  - the paste is a multi-field blob with a line for THIS field:
+//                                  put just that line's value in;
+//   { action: 'ignore' }         - a multi-field blob without this field: don't dump it here (the
+//                                  field shows a hint to use Paste Data instead).
+// A "multi-field blob" is text with "Label: value" lines for at least two of the page's OTHER
+// fields (`knownFieldNames`: the page's field keys and labels, normalized). Anything else - several
+// paragraphs, a bulleted list, a web address, "NMIMS: a leading university..." - is ordinary
+// content and pastes normally. (An earlier rule treated any paste with a line break or an early
+// colon as a blob and silently dropped it, so multi-paragraph text and links couldn't be pasted.)
+export const decideFieldPaste = (text, { fieldKey, label, knownFieldNames = new Set() }) => {
+  const trimmed = String(text || '').trim();
+  if (!trimmed) return { action: 'default' };
+  const pairs = parseBulkPasteLines(trimmed);
+  if (!pairs.length) return { action: 'default' };
 
-  const looksStructured = /\r?\n/.test(trimmed) || /^[^:=\t]+[:=\t]/.test(trimmed);
-  if (!looksStructured) return trimmed;
+  const own = new Set([normalizeKey(fieldKey), normalizeKey(label)]);
+  const ownPair = pairs.find(([k]) => own.has(normalizeKey(k)));
+  const otherFields = new Set(pairs.map(([k]) => normalizeKey(k)).filter(k => knownFieldNames.has(k) && !own.has(k)));
 
-  const wanted = new Set([normalizeKey(fieldKey), normalizeKey(label)]);
-  const pairs = parseBulkPasteLines(text);
-  const match = pairs.find(([k]) => wanted.has(normalizeKey(k)));
-  return match ? match[1] : null;
+  if (otherFields.size >= 2) return ownPair ? { action: 'insert', value: ownPair[1] } : { action: 'ignore' };
+  // A single "This Field: value" line (e.g. copied from a filled-in template): take just the value.
+  if (ownPair && pairs.length === 1 && !/\r?\n/.test(trimmed)) return { action: 'insert', value: ownPair[1] };
+  return { action: 'default' };
 };
+
+// What a paste into one cell of a list (repeater) does: 'rows' splits it into rows/columns,
+// 'default' leaves it in the cell. A spreadsheet copy (tabs) is always rows. Several lines without
+// tabs are rows only in a one-line cell (a column copied from a sheet); in a multi-line cell - an
+// FAQ answer, a review, a description - or a bullet-list cell they are that cell's own text.
+export const decideSubfieldPaste = (text, subfield) => {
+  const value = String(text || '');
+  if (value.includes('\t')) return 'rows';
+  if (!/\r?\n/.test(value.trim())) return 'default';
+  if (subfield.outputFormat === 'bullets' || subfield.type === 'textarea') return 'default';
+  return 'rows';
+};
+
+// Builds the knownFieldNames set decideFieldPaste needs, from a page type's schema.
+export const fieldNamesOf = (schema) => new Set((schema?.sections || []).flatMap(sec => sec.fields)
+  .flatMap(f => [normalizeKey(f.key), normalizeKey(f.label)]));
