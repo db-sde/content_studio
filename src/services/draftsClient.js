@@ -1,43 +1,4 @@
-import { getJSON, postJSON } from './httpClient.js';
-
-// PUT/DELETE aren't in httpClient's helper set (only GET/POST) — kept local since drafts is the
-// only client that currently needs them.
-async function putJSON(path, body) {
-  const res = await fetch(path, {
-    method: 'PUT',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error || `Request to ${path} failed (${res.status})`);
-  }
-  return res.json();
-}
-
-async function deleteJSON(path) {
-  const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error || `Request to ${path} failed (${res.status})`);
-  }
-  return res.json();
-}
-
-async function patchJSON(path, body) {
-  const res = await fetch(path, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error || `Request to ${path} failed (${res.status})`);
-  }
-  return res.json();
-}
+import { getJSON, postJSON, putJSON, patchJSON, deleteJSON } from './httpClient.js';
 
 export function listDrafts() {
   return getJSON('/api/drafts');

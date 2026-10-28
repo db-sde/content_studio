@@ -46,6 +46,7 @@ import { useAuth } from './context/AuthContext';
 import { useToast } from './context/ToastContext';
 import { BootstrapScreen } from './screens/BootstrapScreen';
 import { LoginScreen } from './screens/LoginScreen';
+import { onServerWaking } from './services/httpClient';
 import { InviteAcceptScreen } from './screens/InviteAcceptScreen';
 import { PasswordResetScreen } from './screens/PasswordResetScreen';
 import {
@@ -3165,8 +3166,23 @@ function ContentStudioApp() {
 // user clicking their own generated invite link should still see the accept screen, since
 // accepting creates a separate new account rather than touching their own session). Everything
 // else is gated on the current auth status before any of ContentStudioApp's internals run.
+// While a request waits for the backend to wake up (see services/httpClient.js), say so - otherwise
+// a minute of nothing reads as "it's broken". At most once a minute.
+function useServerWakingNotice() {
+  const toast = useToast();
+  useEffect(() => {
+    let lastShownAt = 0;
+    return onServerWaking(() => {
+      if (Date.now() - lastShownAt < 60_000) return;
+      lastShownAt = Date.now();
+      toast.info('The server is starting up after being idle - this can take up to a minute. It will carry on by itself.', 20000);
+    });
+  }, [toast]);
+}
+
 function App() {
   const { status } = useAuth();
+  useServerWakingNotice();
 
   const inviteMatch = window.location.pathname.match(/^\/invite\/([^/]+)$/);
   if (inviteMatch) return <InviteAcceptScreen token={inviteMatch[1]} />;

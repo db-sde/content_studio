@@ -13,7 +13,8 @@ export function bootstrap(payload) {
 }
 
 export function login(payload) {
-  return postJSON('/api/auth/login', payload);
+  // Safe to re-send while the server wakes up: a request that never reached it signed nobody in.
+  return postJSON('/api/auth/login', payload, { retryWhileWaking: true });
 }
 
 export function logout() {

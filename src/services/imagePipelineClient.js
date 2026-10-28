@@ -1,29 +1,4 @@
-import { getJSON, postJSON } from './httpClient.js';
-
-// PATCH/DELETE aren't in httpClient's helper set (only GET/POST) — same reason draftsClient.js
-// keeps its own local copies rather than sharing one central version.
-async function patchJSON(path, body) {
-  const res = await fetch(path, {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error || `Request to ${path} failed (${res.status})`);
-  }
-  return res.json();
-}
-
-async function deleteJSON(path) {
-  const res = await fetch(path, { method: 'DELETE', credentials: 'include' });
-  if (!res.ok) {
-    const payload = await res.json().catch(() => ({}));
-    throw new Error(payload.error || `Request to ${path} failed (${res.status})`);
-  }
-  return res.json();
-}
+import { getJSON, postJSON, patchJSON, deleteJSON } from './httpClient.js';
 
 // --- Draft-linked (the normal path: Senior/Admin generating images for a real, reviewed page) --
 
