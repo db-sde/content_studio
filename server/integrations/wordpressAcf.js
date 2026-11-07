@@ -133,6 +133,9 @@ const FIELD_MAPS = {
     })
   },
   course: {
+    // The course page's field is validity today; program_validity (the specialization page's name
+    // for it) is being added on WordPress. Sent as both - whichever exists takes it.
+    validity: (value) => ({ validity: value, program_validity: value }),
     // course has a highlights repeater of its own AND a single-block copy for the summary display.
     highlights: (rows) => ({ highlights: rows, highlights_section_content: rowsToHtmlList(rows, 'highlight_title', 'highlight_description') }),
     eligibility_content: eligibilityRows,
@@ -235,16 +238,28 @@ function conformValue(value, schema, path, skipped) {
   return { drop: true };
 }
 
+// Other names WordPress may give a field Content Studio sends: ACF builds field names from labels and
+// usually drops characters like "&", so "Job Roles & Salary Paragraph" can arrive as either of these.
+const FIELD_ALIASES = {
+  'job_roles_&_salary_paragraph': ['job_roles_salary_paragraph', 'job_roles__salary_paragraph', 'job_roles_and_salary_paragraph']
+};
+
 // `acfSchema` is the "acf" property of the post type's REST schema (OPTIONS /wp-json/wp/v2/<type>).
+// A field WordPress doesn't have (yet) is left out; it's reported only if it had something in it -
+// an empty one loses nothing, and reporting every blank optional field would bury the real notes.
 export function conformToSchema(fields, acfSchema) {
   const props = acfSchema?.properties;
   if (!props) return { fields, skipped: [] };
   const out = {};
   const skipped = [];
   for (const [key, value] of Object.entries(fields)) {
-    if (!props[key]) { skipped.push(`${key} (no such field in WordPress)`); continue; }
-    const r = conformValue(value, props[key], key, skipped);
-    if (!r.drop) out[key] = r.value;
+    const target = props[key] ? key : (FIELD_ALIASES[key] || []).find(alias => props[alias]);
+    if (!target) {
+      if (!isBlank(value) && !(Array.isArray(value) && !value.length)) skipped.push(`${key} (no such field in WordPress yet)`);
+      continue;
+    }
+    const r = conformValue(value, props[target], target, skipped);
+    if (!r.drop) out[target] = r.value;
   }
   return { fields: out, skipped };
 }

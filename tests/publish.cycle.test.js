@@ -183,7 +183,7 @@ test('a University page goes all the way: AI fields, review, approval, live on W
   assert.deepEqual(post.acf.programs_table, [{ program_name: 'Sample program_name', program_fee: 'Sample program_fee', program_eligibility: 'Sample program_eligibility' }]);
   assert.deepEqual(post.acf.faculty_members, [{ member_name: 'Sample member_name', member_designation: 'Sample member_designation, Sample member_program, Sample member_qualification' }]);
   assert.equal(Object.keys(post.acf).length, 41);
-  assert.deepEqual(published.skipped, ['admission_steps_list (no such field in WordPress)']);
+  assert.deepEqual(published.skipped, ['admission_steps_list (no such field in WordPress yet)']);
 
   // Approved, it's offered in the Linked University dropdown of course/specialization pages.
   const directory = (await t.api(intern, 'GET', '/api/directory?pageType=university')).body.entries;

@@ -193,3 +193,21 @@ test('pasting into a field: ordinary text goes in; only a real multi-field paste
   assert.equal(decideSubfieldPaste('Python\nStatistics', { key: 'subjects', type: 'textarea', outputFormat: 'bullets' }), 'default');
   assert.equal(decideSubfieldPaste('Just one value', { key: 'program_name', type: 'text' }), 'default');
 });
+
+test('course and specialization section paragraphs: on the form, optional, typed by hand (not AI)', async () => {
+  const { schemas, validateState } = await import('../src/config/schemas.js');
+  const expected = {
+    course: ['accreditation_paragraph', 'eligibility_criteria_paragraph', 'fee_heading', 'fee_structure_paragraph', 'job_roles_&_salary_paragraph', 'syllabus_section_paragraph', 'validity'],
+    specialization: ['eligibility_criteria_paragraph', 'fee_heading', 'fee_section_paragraph', 'job_profiles_section_paragraph', 'other_specializations_section_paragraph', 'syllabus_section_paragraph']
+  };
+  for (const [pageType, keys] of Object.entries(expected)) {
+    const fields = Object.fromEntries(schemas[pageType].sections.flatMap(sec => sec.fields).map(f => [f.key, f]));
+    for (const key of keys) {
+      assert.ok(fields[key], `${pageType}: ${key} is on the form`);
+      assert.equal(fields[key].required, false, `${pageType}: ${key} is optional`);
+      assert.ok(!fields[key].aiAssist, `${pageType}: ${key} is filled by hand`);
+    }
+    const errors = validateState({}, pageType).errors.join(' ');
+    for (const key of keys) assert.ok(!errors.includes(fields[key].label), `${pageType}: an empty ${key} never blocks a draft`);
+  }
+});

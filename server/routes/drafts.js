@@ -499,7 +499,10 @@ draftsRouter.get('/:id/remarks', asyncRoute(async (req, res) => {
 // Real running total, computed on-demand from this draft's actual generation/evaluation rows —
 // cheap (at most ~20 rows per draft), so no need to cache/denormalize onto the drafts row.
 draftsRouter.get('/:id/cost-summary', asyncRoute(async (req, res) => {
-  const draft = await loadDraftOr404(req.params.id);
+  // Only needs to know the draft exists - not its whole form data, which grows with every field.
+  if (!DRAFT_ID_RE.test(req.params.id)) throw notFound();
+  const draft = await getDraftStatusInfo(req.params.id);
+  if (!draft) throw notFound();
   // Summed per model in the database - this used to SELECT * every generation log for the draft
   // (including each full prompt and output text) just to add up token counts.
   const generation = await getGenerationUsageForDraft(draft.id);

@@ -275,6 +275,7 @@ export const schemas = {
         icon: 'Award',
         fields: [
           { key: 'accreditations_heading', type: 'TEXT_INPUT', label: 'Accreditations Section Heading', placeholder: 'e.g. Accreditations' },
+          { key: 'accreditation_paragraph', type: 'TEXTAREA', label: 'Accreditations Paragraph', rows: 3, placeholder: 'A short paragraph shown in the accreditations section' },
           // Keys match the course page's own ACF fields on WordPress, so these publish as they are.
           { key: 'course_accreditations', type: 'REPEATER', label: 'Accreditations', subfields: [
             { key: 'course_body_name', label: 'Body Name', type: 'text', placeholder: 'e.g. NAAC' },
@@ -310,7 +311,10 @@ export const schemas = {
             { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
           ] },
           { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month' },
-          { key: 'validity', type: 'TEXT_INPUT', label: 'Validity', placeholder: 'e.g. 4 Years' }
+          // Published as both validity (the course page's field today) and program_validity (being added
+          // on WordPress) - see wordpressAcf.js.
+          { key: 'validity', type: 'TEXT_INPUT', label: 'Program Validity', placeholder: 'e.g. 4 Years' },
+          { key: 'fee_structure_paragraph', type: 'TEXTAREA', label: 'Fee Structure Paragraph', rows: 3, placeholder: 'A short paragraph shown in the fee section' }
         ]
       },
       {
@@ -319,6 +323,7 @@ export const schemas = {
         icon: 'CheckSquare',
         fields: [
           { key: 'eligibility_heading', type: 'TEXT_INPUT', label: 'Eligibility Section Heading', placeholder: 'e.g. Eligibility Criteria' },
+          { key: 'eligibility_criteria_paragraph', type: 'TEXTAREA', label: 'Eligibility Criteria Paragraph', rows: 3, placeholder: 'A short paragraph shown in the eligibility section' },
           { key: 'eligibility_content', type: 'RICH_TEXT', label: 'Eligibility Content', placeholder: 'Describe eligibility requirements', required: true, aiAssist: { instructions: 'Describe the eligibility requirements for admission in plain, precise terms, grounded only in the facts provided.' } }
         ]
       },
@@ -339,6 +344,7 @@ export const schemas = {
         icon: 'BookOpen',
         fields: [
           { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
+          { key: 'syllabus_section_paragraph', type: 'TEXTAREA', label: 'Syllabus Section Paragraph', rows: 3, placeholder: 'A short paragraph shown in the syllabus section' },
           { key: 'syllabus_subjects', type: 'REPEATER', label: 'Syllabus Subjects', subfields: [
             { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester I', autoDefault: 'semester' },
             { key: 'subjects', label: 'Subjects (one per line)', type: 'textarea', rows: 4, outputFormat: 'bullets', hint: 'Published as a bullet list - put each subject on its own line.', placeholder: 'Marketing Management\nFinancial Accounting\nBusiness Statistics' }
@@ -362,6 +368,7 @@ export const schemas = {
         icon: 'Briefcase',
         fields: [
           { key: 'jobs_heading', type: 'TEXT_INPUT', label: 'Jobs Section Heading', placeholder: 'e.g. Job Opportunities' },
+          { key: 'job_roles_&_salary_paragraph', type: 'TEXTAREA', label: 'Job Roles & Salary Paragraph', rows: 3, placeholder: 'A short paragraph shown with the job roles and salaries' },
           { key: 'job_profiles', type: 'REPEATER', label: 'Job Profiles', subfields: JOB_PROFILES_SUBFIELDS }
         ]
       },
@@ -447,6 +454,7 @@ export const schemas = {
         icon: 'CheckSquare',
         fields: [
           { key: 'eligibility_heading', type: 'TEXT_INPUT', label: 'Eligibility Section Heading', placeholder: 'e.g. Eligibility Criteria' },
+          { key: 'eligibility_criteria_paragraph', type: 'TEXTAREA', label: 'Eligibility Criteria Paragraph', rows: 3, placeholder: 'A short paragraph shown in the eligibility section' },
           { key: 'eligibility_content', type: 'RICH_TEXT', label: 'Eligibility Content', placeholder: 'Describe eligibility requirements', required: true, aiAssist: { instructions: 'Describe the eligibility requirements for admission in plain, precise terms, grounded only in the facts provided.' } }
         ]
       },
@@ -461,7 +469,8 @@ export const schemas = {
             { key: 'plan_amount', label: 'Plan Amount', type: 'text', placeholder: 'e.g. ₹35,000' },
             { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
           ] },
-          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month', required: true }
+          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month', required: true },
+          { key: 'fee_section_paragraph', type: 'TEXTAREA', label: 'Fee Section Paragraph', rows: 3, placeholder: 'A short paragraph shown in the fee section' }
         ]
       },
       {
@@ -470,6 +479,7 @@ export const schemas = {
         icon: 'Table',
         fields: [
           { key: 'other_specs_heading', type: 'TEXT_INPUT', label: 'Other Specializations Section Heading', placeholder: 'e.g. Other Specializations & Fees' },
+          { key: 'other_specializations_section_paragraph', type: 'TEXTAREA', label: 'Other Specializations Paragraph', rows: 3, placeholder: 'A short paragraph shown above the other specializations' },
           { key: 'other_specs', type: 'REPEATER', label: 'Other Specializations', subfields: [
             { key: 'other_spec_name', label: 'Specialization Name', type: 'text', placeholder: 'e.g. MBA in Finance' },
             { key: 'other_spec_fee', label: 'Fee Per Semester', type: 'text', placeholder: 'e.g. ₹55,000' }
@@ -482,6 +492,7 @@ export const schemas = {
         icon: 'BookOpen',
         fields: [
           { key: 'syllabus_heading', type: 'TEXT_INPUT', label: 'Syllabus Section Heading', placeholder: 'e.g. Syllabus' },
+          { key: 'syllabus_section_paragraph', type: 'TEXTAREA', label: 'Syllabus Section Paragraph', rows: 3, placeholder: 'A short paragraph shown in the syllabus section' },
           { key: 'syllabus_subjects', type: 'REPEATER', label: 'Syllabus Subjects', subfields: [
             { key: 'semester', label: 'Semester', type: 'text', placeholder: 'e.g. Semester I', autoDefault: 'semester' },
             { key: 'subjects', label: 'Subjects (one per line)', type: 'textarea', rows: 4, outputFormat: 'bullets', hint: 'Published as a bullet list - put each subject on its own line.', placeholder: 'Marketing Management\nFinancial Accounting\nBusiness Statistics' }
@@ -526,6 +537,7 @@ export const schemas = {
         icon: 'Briefcase',
         fields: [
           { key: 'jobs_heading', type: 'TEXT_INPUT', label: 'Jobs Section Heading', placeholder: 'e.g. Job Opportunities' },
+          { key: 'job_profiles_section_paragraph', type: 'TEXTAREA', label: 'Job Profiles Section Paragraph', rows: 3, placeholder: 'A short paragraph shown with the job profiles' },
           { key: 'job_profiles', type: 'REPEATER', label: 'Job Profiles', subfields: JOB_PROFILES_SUBFIELDS }
         ]
       },
@@ -580,7 +592,12 @@ export const schemas = {
 // so the UI (asterisks, "Required Fields" badges) stays in sync for free.
 const OPTIONAL_FIELD_KEYS = new Set([
   'seo_title', 'meta_description',
-  'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes'
+  'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes',
+  // Section paragraphs and a few extras the WordPress course/specialization pages show, typed in by
+  // hand when there's something to say - never required, never AI-written.
+  'fee_heading', 'validity', 'accreditation_paragraph', 'eligibility_criteria_paragraph', 'fee_structure_paragraph',
+  'fee_section_paragraph', 'job_roles_&_salary_paragraph', 'job_profiles_section_paragraph',
+  'other_specializations_section_paragraph', 'syllabus_section_paragraph'
 ]);
 
 Object.values(schemas).forEach(schema => {
