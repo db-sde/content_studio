@@ -234,42 +234,37 @@ test("course and university fields map onto the site's own (and pass its field r
   for (const [k, v] of Object.entries(u.fields)) assert.equal(wpInvalid(v, SCHEMAS.university.properties[k], k), null);
 });
 
-// Section paragraphs typed by hand on course/specialization pages. WordPress didn't have these fields
-// yet when they were added: until it does they're left out (reported only if filled in); once it
-// does, they go through - including the "&" one under whatever name WordPress gives it.
-test('hand-written section paragraphs: sent once WordPress has the field, reported until then', () => {
+// Section paragraphs typed by hand on course/specialization pages, against the staging site's own
+// fields (tests/fixtures): what it has is sent, what it lacks is reported only if filled in, and
+// names that differ between sites (validity / program_validity, "&" in a name) still find their field.
+test('hand-written section paragraphs reach the fields the site has, under whatever name it uses', () => {
   const coursePage = mapToWordPress({
     program_name: 'Online MBA', validity: '4 Years', fee_heading: 'Fee Structure',
     accreditation_paragraph: 'Approved by UGC-DEB and AICTE.', eligibility_criteria_paragraph: '',
     fee_structure_paragraph: 'Pay per semester or yearly.', 'job_roles_&_salary_paragraph': 'Roles pay INR 6-12 LPA.',
-    syllabus_section_paragraph: ''
+    syllabus_section_paragraph: 'Four semesters of core and elective subjects.'
   }, 'course');
-  // Today's site: only fee_heading and validity exist.
-  const today = conformToSchema(coursePage.fields, SCHEMAS.course);
-  assert.equal(today.fields.fee_heading, 'Fee Structure');
-  assert.equal(today.fields.validity, '4 Years');
-  assert.deepEqual(today.skipped.sort(), [
-    'accreditation_paragraph (no such field in WordPress yet)', 'fee_structure_paragraph (no such field in WordPress yet)',
-    'job_roles_&_salary_paragraph (no such field in WordPress yet)', 'program_validity (no such field in WordPress yet)'
-  ], 'filled ones are reported; the empty ones (eligibility, syllabus) are not');
+  const staging = conformToSchema(coursePage.fields, SCHEMAS.course);
+  assert.equal(staging.fields.fee_heading, 'Fee Structure');
+  assert.equal(staging.fields.program_validity, '4 Years');
+  assert.equal(staging.fields.accreditation_paragraph, 'Approved by UGC-DEB and AICTE.');
+  assert.equal(staging.fields.fee_structure_paragraph, 'Pay per semester or yearly.');
+  assert.equal(staging.fields['job_roles_&_salary_paragraph'], 'Roles pay INR 6-12 LPA.');
+  assert.deepEqual(staging.skipped, ['syllabus_section_paragraph (no such field in WordPress yet)'], 'the empty eligibility paragraph is not reported');
 
-  // Once WordPress adds them (the & dropped from the name, as ACF does):
-  const withFields = { ...SCHEMAS.course, properties: { ...SCHEMAS.course.properties } };
-  for (const k of ['accreditation_paragraph', 'eligibility_criteria_paragraph', 'fee_structure_paragraph', 'job_roles_salary_paragraph', 'syllabus_section_paragraph', 'program_validity']) {
-    withFields.properties[k] = { type: ['string', 'null'] };
-  }
-  const later = conformToSchema(coursePage.fields, withFields);
-  assert.deepEqual(later.skipped, []);
-  assert.equal(later.fields.accreditation_paragraph, 'Approved by UGC-DEB and AICTE.');
-  assert.equal(later.fields.job_roles_salary_paragraph, 'Roles pay INR 6-12 LPA.');
-  assert.equal(later.fields.program_validity, '4 Years');
-  assert.equal(later.fields.validity, '4 Years');
+  // A site with the older names: validity, and the "&" dropped from the job roles field.
+  const props = { ...SCHEMAS.course.properties, validity: { type: ['string', 'null'] }, job_roles_salary_paragraph: { type: ['string', 'null'] } };
+  delete props.program_validity;
+  delete props['job_roles_&_salary_paragraph'];
+  const older = conformToSchema(coursePage.fields, { ...SCHEMAS.course, properties: props });
+  assert.equal(older.fields.validity, '4 Years');
+  assert.equal(older.fields.job_roles_salary_paragraph, 'Roles pay INR 6-12 LPA.');
 
-  const specPage = mapToWordPress({ spec_name: 'Online MBA in Finance', fee_section_paragraph: 'EMI available.', other_specializations_section_paragraph: 'Also offered: HR, Marketing.', job_profiles_section_paragraph: '' }, 'specialization');
-  const specLater = conformToSchema(specPage.fields, { ...SCHEMAS.specialization, properties: { ...SCHEMAS.specialization.properties, fee_section_paragraph: { type: ['string', 'null'] }, other_specializations_section_paragraph: { type: ['string', 'null'] } } });
-  assert.equal(specLater.fields.fee_section_paragraph, 'EMI available.');
-  assert.equal(specLater.fields.other_specializations_section_paragraph, 'Also offered: HR, Marketing.');
-  assert.deepEqual(specLater.skipped, [], 'the empty job profiles paragraph is not reported');
+  const specPage = mapToWordPress({ spec_name: 'Online MBA in Finance', fee_section_paragraph: 'EMI available.', other_specializations_section_paragraph: 'Also offered: HR, Marketing.', syllabus_section_paragraph: 'Core and electives.', eligibility_criteria_paragraph: 'Any graduate.', job_profiles_section_paragraph: '' }, 'specialization');
+  const spec = conformToSchema(specPage.fields, SCHEMAS.specialization);
+  for (const k of ['fee_section_paragraph', 'other_specializations_section_paragraph', 'syllabus_section_paragraph', 'eligibility_criteria_paragraph']) assert.ok(spec.fields[k], k);
+  assert.equal(spec.fields.job_profiles_section_paragraph, '');
+  assert.deepEqual(spec.skipped, []);
 });
 
 test("the schema check leaves out what still doesn't fit instead of breaking the publish", () => {

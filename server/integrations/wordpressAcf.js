@@ -133,9 +133,9 @@ const FIELD_MAPS = {
     })
   },
   course: {
-    // The course page's field is validity today; program_validity (the specialization page's name
-    // for it) is being added on WordPress. Sent as both - whichever exists takes it.
-    validity: (value) => ({ validity: value, program_validity: value }),
+    // WordPress renamed the course page's validity field to program_validity (as on specialization
+    // pages); a site still on the old name gets it as validity - see FIELD_ALIASES.
+    validity: (value) => ({ program_validity: value }),
     // course has a highlights repeater of its own AND a single-block copy for the summary display.
     highlights: (rows) => ({ highlights: rows, highlights_section_content: rowsToHtmlList(rows, 'highlight_title', 'highlight_description') }),
     eligibility_content: eligibilityRows,
@@ -238,10 +238,11 @@ function conformValue(value, schema, path, skipped) {
   return { drop: true };
 }
 
-// Other names WordPress may give a field Content Studio sends: ACF builds field names from labels and
-// usually drops characters like "&", so "Job Roles & Salary Paragraph" can arrive as either of these.
+// Other names a WordPress site may use for a field Content Studio sends: ACF builds field names from
+// labels and usually drops characters like "&"; and older sites still call program_validity validity.
 const FIELD_ALIASES = {
-  'job_roles_&_salary_paragraph': ['job_roles_salary_paragraph', 'job_roles__salary_paragraph', 'job_roles_and_salary_paragraph']
+  'job_roles_&_salary_paragraph': ['job_roles_salary_paragraph', 'job_roles__salary_paragraph', 'job_roles_and_salary_paragraph'],
+  program_validity: ['validity']
 };
 
 // `acfSchema` is the "acf" property of the post type's REST schema (OPTIONS /wp-json/wp/v2/<type>).

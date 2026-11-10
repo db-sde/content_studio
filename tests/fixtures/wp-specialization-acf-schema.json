@@ -145,6 +145,13 @@
    ],
    "required": false
   },
+  "eligibility_criteria_paragraph": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "eligibility_content": {
    "type": [
     "array",
@@ -185,6 +192,13 @@
    ],
    "required": false
   },
+  "fee_section_paragraph": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "other_specs_heading": {
    "type": [
     "string",
@@ -192,7 +206,21 @@
    ],
    "required": false
   },
+  "other_specializations_section_paragraph": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "syllabus_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "syllabus_section_paragraph": {
    "type": [
     "string",
     "null"
@@ -221,6 +249,13 @@
    "required": false
   },
   "jobs_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "job_profiles_section_paragraph": {
    "type": [
     "string",
     "null"

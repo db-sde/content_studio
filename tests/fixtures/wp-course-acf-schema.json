@@ -145,6 +145,13 @@
    ],
    "required": false
   },
+  "accreditation_paragraph": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "course_accreditations": {
    "type": [
     "array",
@@ -226,6 +233,13 @@
    }
   },
   "eligibility_heading": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
+  "eligibility_criteria_paragraph": {
    "type": [
     "string",
     "null"
@@ -314,6 +328,13 @@
    ],
    "required": false
   },
+  "job_roles_&_salary_paragraph": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "faqs_heading": {
    "type": [
     "string",
@@ -342,7 +363,7 @@
    ],
    "required": false
   },
-  "validity": {
+  "certificate_validity": {
    "type": [
     "string",
     "null"
@@ -575,6 +596,13 @@
    ],
    "required": false
   },
+  "fee_structure_paragraph": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "semester_plan_amount": {
    "type": [
     "string",
@@ -626,6 +654,13 @@
    "description": "A `Y-m-d H:i:s` formatted date string.",
    "required": false
   },
+  "program_validity": {
+   "type": [
+    "string",
+    "null"
+   ],
+   "required": false
+  },
   "fee_plans": {
    "type": [
     "array",
@@ -662,6 +697,13 @@
   "video_course_thumbnail": {
    "type": [
     "integer",
+    "null"
+   ],
+   "required": false
+  },
+  "scholarship_facility": {
+   "type": [
+    "string",
     "null"
    ],
    "required": false
