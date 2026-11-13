@@ -218,6 +218,50 @@ export function wordpressTargetOf(pageType, field, liveFieldNames = null) {
   return target;
 }
 
+// What an Admin-added field can fill, judged from the site's own schema for that ACF field: plain
+// text (the Admin picks one line / paragraph / formatted), or a list whose columns are all text
+// (built with those columns). Images and page links (stored as IDs), dates and numbers need code.
+export function classifyWordPressField(prop) {
+  const types = [].concat(prop?.type || []);
+  if (types.includes('string') && !types.includes('array') && !types.includes('integer')) {
+    if (/Y-m-d|date/i.test(prop.description || '')) return { kind: 'unsupported', reason: 'a date' };
+    return { kind: 'text' };
+  }
+  if (types.includes('array') && prop.items && [].concat(prop.items.type || []).includes('object')) {
+    const columns = Object.entries(prop.items.properties || {});
+    if (columns.length && columns.every(([, c]) => [].concat(c?.type || []).includes('string'))) {
+      return { kind: 'list', columns: columns.map(([key]) => key) };
+    }
+    return { kind: 'unsupported', reason: 'a list with non-text columns' };
+  }
+  if (types.includes('array')) return { kind: 'unsupported', reason: 'links to other pages or categories' };
+  if (types.includes('integer')) return { kind: 'unsupported', reason: 'an image, file or page link (stored as an ID)' };
+  if (types.includes('number')) return { kind: 'unsupported', reason: 'a number' };
+  return { kind: 'unsupported', reason: 'a field type the app can\'t fill' };
+}
+
+// The site's fields nothing in the app fills yet - what the Admin can add a field for. `builtInFields`:
+// the page's built-in schema fields; `customKeys`: names already taken by added fields (archived
+// ones too - those are restored, not added again). Returns { addable: [{ key, kind, columns? }],
+// unsupported: [{ key, reason }] }, both sorted by name.
+export function addableWordPressFields(pageType, liveProps, builtInFields, customKeys = []) {
+  const names = Object.keys(liveProps || {});
+  const taken = new Set(customKeys);
+  for (const field of builtInFields) {
+    for (const k of wordpressTargetOf(pageType, field, names).wpKeys) taken.add(k);
+    taken.add(field.key);
+  }
+  const addable = [];
+  const unsupported = [];
+  for (const key of names.sort()) {
+    if (taken.has(key)) continue;
+    const c = classifyWordPressField(liveProps[key]);
+    if (c.kind === 'unsupported') unsupported.push({ key, reason: c.reason });
+    else addable.push({ key, ...c });
+  }
+  return { addable, unsupported };
+}
+
 const typesOf = (schema) => [].concat(schema?.type || []);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isBlank = (v) => v === null || v === undefined || (typeof v === 'string' && !v.trim());

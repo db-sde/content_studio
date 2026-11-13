@@ -70,15 +70,60 @@ const overrideIndex = (overrides) => {
   return byKey;
 };
 
-// `overrides`: [{ pageType, fieldKey, visible, required, aiGenerated, internFillable, aiInstructions }]
-// as GET /api/field-settings returns them. Each page type's schema keeps only its visible fields
-// (sections left empty are dropped) and lists the hidden ones in `hiddenFieldKeys`. In the result a
-// field's `required` and `aiAssist` reflect the settings, and `internWritable` is set on every field:
-// whether an Intern may fill it in (see canEditField).
-export function buildEffectiveSchemas(overrides = []) {
-  const byKey = overrideIndex(overrides);
+// --- Fields an Admin added ------------------------------------------------------------------------
+// Each one fills one WordPress field of the same name (picked from the site's own list) and is
+// stored in the custom_fields table: { pageType, fieldKey, label, type, sectionId, afterFieldKey,
+// placeholder, subfields, archivedAt }. Removing one archives it - what was typed in it is kept.
+export const CUSTOM_FIELD_TYPES = ['TEXT_INPUT', 'TEXTAREA', 'RICH_TEXT', 'REPEATER'];
+
+export const humanizeFieldKey = (key) => String(key || '')
+  .replace(/[_-]+/g, ' ').trim()
+  .replace(/\b([a-z])/g, (m) => m.toUpperCase())
+  .replace(/\b(Emi|Nirf|Ugc|Naac|Faq|Faqs|Seo|Mba|Bba)\b/g, (m) => m.toUpperCase().replace('FAQS', 'FAQs'));
+
+export function customFieldToSchemaField(cf) {
+  const field = {
+    key: cf.fieldKey,
+    label: cf.label,
+    type: cf.type,
+    placeholder: cf.placeholder || '',
+    required: false,
+    custom: true
+  };
+  if (cf.type === 'TEXTAREA') field.rows = 3;
+  if (cf.type === 'REPEATER') field.subfields = (cf.subfields || []).map(sf => ({ key: sf.key, label: sf.label || humanizeFieldKey(sf.key), type: 'text', placeholder: '' }));
+  return field;
+}
+
+// The built-in schemas plus every active (not archived) added field, each placed in its section
+// after the field it names (or at the end of the section; or of the page, if the section is gone).
+// Nothing hidden: this is what's exported and published - see transformToACF.
+export function withCustomFields(customFields = []) {
   const result = {};
   for (const [pageType, schema] of Object.entries(schemas)) {
+    const sections = schema.sections.map(section => ({ ...section, fields: [...section.fields] }));
+    for (const cf of customFields || []) {
+      if (cf.pageType !== pageType || cf.archivedAt) continue;
+      if (sections.some(sec => sec.fields.some(f => f.key === cf.fieldKey))) continue;
+      const section = sections.find(sec => sec.id === cf.sectionId) || sections[sections.length - 1];
+      const after = cf.afterFieldKey ? section.fields.findIndex(f => f.key === cf.afterFieldKey) : -1;
+      section.fields.splice(after >= 0 ? after + 1 : section.fields.length, 0, customFieldToSchemaField(cf));
+    }
+    result[pageType] = { ...schema, sections };
+  }
+  return result;
+}
+
+// `overrides`: [{ pageType, fieldKey, visible, required, aiGenerated, internFillable, aiInstructions }]
+// as GET /api/field-settings returns them; `customFields`: the fields an Admin added (see above).
+// Each page type's schema keeps only its visible fields (sections left empty are dropped) and lists
+// the hidden ones in `hiddenFieldKeys`. In the result a field's `required` and `aiAssist` reflect
+// the settings, and `internWritable` is set on every field: whether an Intern may fill it in (see
+// canEditField).
+export function buildEffectiveSchemas(overrides = [], customFields = []) {
+  const byKey = overrideIndex(overrides);
+  const result = {};
+  for (const [pageType, schema] of Object.entries(withCustomFields(customFields))) {
     const hiddenFieldKeys = [];
     const sections = schema.sections.map(section => ({
       ...section,

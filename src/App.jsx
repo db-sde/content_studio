@@ -28,7 +28,7 @@ import { AssignInternMenu } from './components/AssignInternMenu';
 import { InvitePanel } from './components/InvitePanel';
 import { FieldTags } from './components/FieldTags';
 import { FieldSettingsPanel } from './screens/FieldSettingsPanel';
-import { buildEffectiveSchemas, aiFieldsOf, aiFactsOf, aiOutputFormatOf, fieldsOutOfInternReach } from './config/fieldSettings';
+import { buildEffectiveSchemas, withCustomFields, aiFieldsOf, aiFactsOf, aiOutputFormatOf, fieldsOutOfInternReach } from './config/fieldSettings';
 import * as fieldSettingsClient from './services/fieldSettingsClient';
 import { RemarksPanel } from './components/RemarksPanel';
 import { ColumnFilter } from './components/ColumnFilter';
@@ -283,16 +283,22 @@ function ContentStudioApp() {
   // each field goes on WordPress. Every form, check and AI call reads effectiveSchemas - the
   // built-in schemas with those settings applied (see config/fieldSettings.js); the server applies
   // the same settings to everything it checks.
-  const [fieldOverrides, setFieldOverrides] = useState([]);
+  // fieldSettings: { overrides, customFields } (customFields: the fields an Admin added).
+  const [fieldSettings, setFieldSettings] = useState({ overrides: [], customFields: [] });
   const [wordpressTargets, setWordpressTargets] = useState(null);
-  const effectiveSchemas = useMemo(() => buildEffectiveSchemas(fieldOverrides), [fieldOverrides]);
+  const effectiveSchemas = useMemo(() => buildEffectiveSchemas(fieldSettings.overrides, fieldSettings.customFields), [fieldSettings]);
+  // Built-in + added fields, nothing hidden: what Preview/Download JSON shows (and publishing sends).
+  const publishSchemas = useMemo(() => withCustomFields(fieldSettings.customFields), [fieldSettings]);
   const refreshFieldSettings = useCallback(() => {
-    fieldSettingsClient.getFieldSettings().then(r => setFieldOverrides(r.overrides)).catch(e => console.error('Error loading field settings', e));
+    fieldSettingsClient.getFieldSettings().then(setFieldSettings).catch(e => console.error('Error loading field settings', e));
+  }, []);
+  const refreshWordpressTargets = useCallback(() => {
+    fieldSettingsClient.getWordPressTargets().then(setWordpressTargets).catch(e => console.error('Error loading WordPress field list', e));
   }, []);
   useEffect(() => {
     refreshFieldSettings();
-    fieldSettingsClient.getWordPressTargets().then(setWordpressTargets).catch(e => console.error('Error loading WordPress field list', e));
-  }, [refreshFieldSettings]);
+    refreshWordpressTargets();
+  }, [refreshFieldSettings, refreshWordpressTargets]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showJsonImageGenerator, setShowJsonImageGenerator] = useState(false);
   const [showDraftImageGenerator, setShowDraftImageGenerator] = useState(false);
@@ -1462,7 +1468,7 @@ function ContentStudioApp() {
   };
 
   const executeDownload = () => {
-    const payload = transformToACF(formData, activePageType);
+    const payload = transformToACF(formData, activePageType, publishSchemas[activePageType]);
     const uName = (formData.university_name || 'university').trim().toLowerCase().replace(/\s+/g, '_');
     const pageName = activePageType === PAGE_TYPES.SPECIALIZATION 
       ? (formData.spec_name || 'specialization').trim().toLowerCase().replace(/\s+/g, '_')
@@ -1520,7 +1526,7 @@ function ContentStudioApp() {
   // arrives for an Intern who has genuinely finished everything that's theirs to fill in.
   const isFieldRelevantToViewer = (field) => canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner });
   const progressPercent = activePageType ? calculateProgress(formData, activePageType, isFieldRelevantToViewer, activeSchema) : 0;
-  const acfPayload = activePageType ? transformToACF(formData, activePageType) : null;
+  const acfPayload = activePageType ? transformToACF(formData, activePageType, publishSchemas[activePageType]) : null;
   // An Intern isn't asked to fill fields the Admin set to "Senior & Admin only" (the server agrees).
   const validationOptions = { schema: activeSchema, skipField: fieldsOutOfInternReach({ role: currentUser.role, draftStatus }) };
   const currentValidation = activePageType ? validateState(formData, activePageType, validationOptions) : { isValid: true, errors: [], invalidFields: {} };
@@ -1642,9 +1648,10 @@ function ContentStudioApp() {
 
         {showFieldSettings && currentUser?.role === 'admin' && (
           <FieldSettingsPanel
-            overrides={fieldOverrides}
-            onOverridesChange={setFieldOverrides}
+            settings={fieldSettings}
+            onSettingsChange={setFieldSettings}
             wordpress={wordpressTargets}
+            onWordpressRefresh={refreshWordpressTargets}
             onClose={() => setShowFieldSettings(false)}
           />
         )}

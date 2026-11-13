@@ -807,14 +807,18 @@ export const isRichTextEmpty = (val) => {
 };
 
 // Transforms the state into the flat ACF-matching JSON payload (field keys match the WP ACF config exactly)
-export const transformToACF = (state, pageType) => {
-  const schema = schemas[pageType];
+// `schema`: defaults to the built-in one; pass withCustomFields(...)[pageType] (fieldSettings.js) to
+// include the fields an Admin added. An added field is left out while it's empty: it may point at a
+// WordPress field someone already filled in by hand on pages published earlier, and sending a blank
+// would wipe that on the next Re-publish.
+export const transformToACF = (state, pageType, schema = schemas[pageType]) => {
   if (!schema) return {};
 
   const output = {};
 
   schema.sections.forEach(section => {
     section.fields.forEach(field => {
+      if (field.custom && !fieldHasContent(state, field)) return;
       if (field.type === 'REPEATER') {
         output[field.key] = cleanRepeater(state[field.key], field.subfields);
       } else if (isHeadingFieldKey(field.key)) {
@@ -826,6 +830,12 @@ export const transformToACF = (state, pageType) => {
   });
 
   return output;
+};
+
+const fieldHasContent = (state, field) => {
+  if (field.type === 'REPEATER') return (state[field.key] || []).some(row => isRowFilled(row, field.subfields));
+  if (field.type === 'RICH_TEXT') return !isRichTextEmpty(state[field.key]);
+  return !!state[field.key] && String(state[field.key]).trim() !== '';
 };
 
 // Checks whether a single field satisfies its "required" rule

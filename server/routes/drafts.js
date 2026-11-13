@@ -16,7 +16,7 @@ import { createNotification, listDraftRemarks } from '../repositories/notificati
 import { publishDraftToWordPress } from '../integrations/wordpressClient.js';
 import { generateImages, getGenerationStatus, getImageHistory, regenerateImage, getCurrentPrompt, patchPrompt, deleteImage } from '../integrations/imagePipelineClient.js';
 import { upsertDirectoryEntry } from '../repositories/directoryRepo.js';
-import { getEffectiveSchemas } from '../repositories/fieldSettingsRepo.js';
+import { getEffectiveSchemas, getPublishSchemas } from '../repositories/fieldSettingsRepo.js';
 import { aiFieldsOf, fieldsOutOfInternReach } from '../../src/config/fieldSettings.js';
 
 export const draftsRouter = Router();
@@ -550,7 +550,8 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
 
   const titleField = TITLE_FIELD_BY_PAGE_TYPE[draft.page_type];
   const title = (titleField && draft.form_data[titleField]) || 'Untitled';
-  const acfFields = transformToACF(draft.form_data, draft.page_type);
+  // Built-in fields plus the ones an Admin added (an added field only when it has something in it).
+  const acfFields = transformToACF(draft.form_data, draft.page_type, (await getPublishSchemas())[draft.page_type]);
 
   // Generated marketing images aren't sent: the site has no image field for them (they'd be the
   // page's Featured Image, which needs uploading to WordPress's media library first - not built
