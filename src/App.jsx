@@ -26,6 +26,10 @@ import {
 import { AiFieldToolbar } from './components/AiFieldToolbar';
 import { AssignInternMenu } from './components/AssignInternMenu';
 import { InvitePanel } from './components/InvitePanel';
+import { FieldTags } from './components/FieldTags';
+import { FieldSettingsPanel } from './screens/FieldSettingsPanel';
+import { buildEffectiveSchemas, aiFieldsOf, aiFactsOf, aiOutputFormatOf, fieldsOutOfInternReach } from './config/fieldSettings';
+import * as fieldSettingsClient from './services/fieldSettingsClient';
 import { RemarksPanel } from './components/RemarksPanel';
 import { ColumnFilter } from './components/ColumnFilter';
 import { ALL, buildDraftColumns, matchesOtherColumns, columnOptionsWithChoice } from './utils/draftColumnFilters';
@@ -274,6 +278,21 @@ function ContentStudioApp() {
   const [showInvitePanel, setShowInvitePanel] = useState(false);
   const [showStyleReview, setShowStyleReview] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
+  const [showFieldSettings, setShowFieldSettings] = useState(false);
+  // The Admin's Field Settings (shown / mandatory / AI-generated / who fills each field) and where
+  // each field goes on WordPress. Every form, check and AI call reads effectiveSchemas - the
+  // built-in schemas with those settings applied (see config/fieldSettings.js); the server applies
+  // the same settings to everything it checks.
+  const [fieldOverrides, setFieldOverrides] = useState([]);
+  const [wordpressTargets, setWordpressTargets] = useState(null);
+  const effectiveSchemas = useMemo(() => buildEffectiveSchemas(fieldOverrides), [fieldOverrides]);
+  const refreshFieldSettings = useCallback(() => {
+    fieldSettingsClient.getFieldSettings().then(r => setFieldOverrides(r.overrides)).catch(e => console.error('Error loading field settings', e));
+  }, []);
+  useEffect(() => {
+    refreshFieldSettings();
+    fieldSettingsClient.getWordPressTargets().then(setWordpressTargets).catch(e => console.error('Error loading WordPress field list', e));
+  }, [refreshFieldSettings]);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showJsonImageGenerator, setShowJsonImageGenerator] = useState(false);
   const [showDraftImageGenerator, setShowDraftImageGenerator] = useState(false);
@@ -338,7 +357,7 @@ function ContentStudioApp() {
   const [notifications, setNotifications] = useState([]);
   // This page type's field names - lets a single field tell a multi-field paste from ordinary text
   // (see useFieldPaste in components/FieldTypes.jsx).
-  const pasteFieldNames = useMemo(() => fieldNamesOf(schemas[activePageType]), [activePageType]);
+  const pasteFieldNames = useMemo(() => fieldNamesOf(effectiveSchemas[activePageType]), [effectiveSchemas, activePageType]);
 
   // The open draft's remarks history (RemarksPanel) - loaded when a draft opens or changes stage.
   // Tagged with its draft so a previous draft's remarks are never shown on the next one.
@@ -694,7 +713,7 @@ function ContentStudioApp() {
   // Scroll-spy: highlights whichever section is currently in view in the sidebar nav
   useEffect(() => {
     if (!activePageType) return;
-    const schema = schemas[activePageType];
+    const schema = effectiveSchemas[activePageType];
     if (!schema) return;
 
     const observer = new IntersectionObserver(
@@ -713,7 +732,7 @@ function ContentStudioApp() {
     });
 
     return () => observer.disconnect();
-  }, [activePageType, expandedSections]);
+  }, [activePageType, expandedSections, effectiveSchemas]);
 
   // Set up 30-second Auto-save
   useEffect(() => {
@@ -789,7 +808,7 @@ function ContentStudioApp() {
       // without any extra UI. Fields Generate/Regenerate/Accept/Reject already touched are left
       // alone (onlyIfMissing: true is a no-op if a row exists).
       if (!isAuto) {
-        const schema = schemas[activePageType];
+        const schema = effectiveSchemas[activePageType];
         if (schema) {
           schema.sections.forEach(sec => {
             sec.fields.forEach(field => {
@@ -821,25 +840,8 @@ function ContentStudioApp() {
     }, 2500);
   }
 
-  // Collects this page type's aiAssist field metadata in the shape the backend's batch endpoint
-  // expects — schemas.js stays the single source of truth, the server never duplicates it.
-  const getAiAssistFieldsForGeneration = () => {
-    const schema = schemas[activePageType];
-    if (!schema) return [];
-    const fields = [];
-    schema.sections.forEach(sec => {
-      sec.fields.forEach(field => {
-        if (!field.aiAssist) return;
-        fields.push({
-          fieldKey: field.key,
-          fieldLabel: field.label,
-          fieldInstructions: field.aiAssist.instructions,
-          outputFormat: field.type === 'RICH_TEXT' ? 'markdown' : field.type === 'TEXT_INPUT' ? 'plain-short' : 'plain'
-        });
-      });
-    });
-    return fields;
-  };
+  // This page type's AI fields under the Admin's field settings, in the shape the batch endpoint takes.
+  const getAiAssistFieldsForGeneration = () => aiFieldsOf(effectiveSchemas[activePageType]);
 
   // Real running cost total, computed server-side from this draft's actual generation/evaluation
   // rows. Refreshed after any action that spends tokens (batch generate, per-field regenerate).
@@ -1141,6 +1143,7 @@ function ContentStudioApp() {
   };
 
   const startNewForm = async (pageType) => {
+    refreshFieldSettings();
     try {
       const { draft } = await draftsClient.createDraft(pageType);
       const initial = getInitialState(pageType);
@@ -1155,6 +1158,7 @@ function ContentStudioApp() {
   };
 
   const loadDraft = async (draftSummary) => {
+    refreshFieldSettings();
     try {
       const { draft } = await draftsClient.getDraft(draftSummary.id);
       dispatch({
@@ -1298,7 +1302,7 @@ function ContentStudioApp() {
   // extractRepeaterBlocks and routed to the matching repeater, appended to whatever rows already
   // exist — everything left over goes through the normal flat key:value line parser as before.
   const applyBulkPaste = (text) => {
-    const schema = schemas[activePageType];
+    const schema = effectiveSchemas[activePageType];
     if (!schema) return;
 
     const flatFields = [];
@@ -1390,7 +1394,7 @@ function ContentStudioApp() {
       return;
     }
 
-    const schema = schemas[activePageType];
+    const schema = effectiveSchemas[activePageType];
     if (!schema) return;
 
     const fieldsByKey = {};
@@ -1510,35 +1514,23 @@ function ContentStudioApp() {
   };
 
   // Active schema variables
-  const activeSchema = activePageType ? schemas[activePageType] : null;
+  const activeSchema = activePageType ? effectiveSchemas[activePageType] : null;
   // Excludes fields the current viewer can't act on right now (e.g. an Intern's locked AI fields)
   // from both the top progress bar and the sidebar dots below — otherwise "100%"/"complete" never
   // arrives for an Intern who has genuinely finished everything that's theirs to fill in.
   const isFieldRelevantToViewer = (field) => canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner });
-  const progressPercent = activePageType ? calculateProgress(formData, activePageType, isFieldRelevantToViewer) : 0;
+  const progressPercent = activePageType ? calculateProgress(formData, activePageType, isFieldRelevantToViewer, activeSchema) : 0;
   const acfPayload = activePageType ? transformToACF(formData, activePageType) : null;
-  const currentValidation = activePageType ? validateState(formData, activePageType) : { isValid: true, errors: [], invalidFields: {} };
+  // An Intern isn't asked to fill fields the Admin set to "Senior & Admin only" (the server agrees).
+  const validationOptions = { schema: activeSchema, skipField: fieldsOutOfInternReach({ role: currentUser.role, draftStatus }) };
+  const currentValidation = activePageType ? validateState(formData, activePageType, validationOptions) : { isValid: true, errors: [], invalidFields: {} };
   // Gates "Generate All AI Fields" — must ignore aiAssist fields (they're required but start
   // blank until generated), unlike currentValidation above which gates the final Download flow.
-  const factsValidation = activePageType ? validateFactsOnly(formData, activePageType) : { isValid: true, errors: [], invalidFields: {} };
+  const factsValidation = activePageType ? validateFactsOnly(formData, activePageType, validationOptions) : { isValid: true, errors: [], invalidFields: {} };
 
-  // Structured facts handed to the AI: every non-aiAssist field's current value. Never includes
-  // other AI-editorial fields, so generation can't be contaminated by a sibling field's draft.
-  // Excludes faqs/reviews specifically: they're independent, editor-authored content blocks, not
-  // grounding facts about the entity, and no aiAssist instruction ever references them — including
-  // them just inflates every Claude/GPT call's input tokens for zero benefit.
-  const AI_FACTS_EXCLUDED_KEYS = new Set(['faqs', 'reviews']);
-  const aiFacts = {};
-  if (activeSchema) {
-    activeSchema.sections.forEach(sec => {
-      sec.fields.forEach(f => {
-        if (!f.aiAssist && !AI_FACTS_EXCLUDED_KEYS.has(f.key)) aiFacts[f.key] = formData[f.key];
-      });
-    });
-  }
-
-  const aiOutputFormat = (field) =>
-    field.type === 'RICH_TEXT' ? 'markdown' : field.type === 'TEXT_INPUT' ? 'plain-short' : 'plain';
+  // Structured facts handed to the AI: every shown, hand-filled field's current value (see aiFactsOf).
+  const aiFacts = aiFactsOf(activeSchema, formData);
+  const aiOutputFormat = aiOutputFormatOf;
 
   // Distinguishes the Intern's very first pass (no aiAssist field has content yet — show
   // "Generate All AI Fields") from a post-revert pass (some aiAssist content already exists,
@@ -1613,6 +1605,15 @@ function ContentStudioApp() {
                   Generate Images
                 </button>
               )}
+              {currentUser?.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => { setShowFieldSettings(true); setShowUserMenu(false); }}
+                  className="w-full text-left px-3.5 py-2 text-navy hover:bg-off transition-colors"
+                >
+                  Field Settings
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { setShowActivity(true); setShowUserMenu(false); }}
@@ -1639,6 +1640,14 @@ function ContentStudioApp() {
           )}
         </div>
 
+        {showFieldSettings && currentUser?.role === 'admin' && (
+          <FieldSettingsPanel
+            overrides={fieldOverrides}
+            onOverridesChange={setFieldOverrides}
+            wordpress={wordpressTargets}
+            onClose={() => setShowFieldSettings(false)}
+          />
+        )}
         {showInvitePanel && (
           <InvitePanel role={currentUser?.role} onClose={() => setShowInvitePanel(false)} />
         )}
@@ -2765,6 +2774,13 @@ function ContentStudioApp() {
                           disabled={locked}
                         />
                       )}
+
+                      <FieldTags
+                        className="mt-1.5"
+                        target={wordpressTargets?.targets?.[activePageType]?.[key]}
+                        checkedLive={!!wordpressTargets?.checkedLive?.[activePageType]}
+                        aiGenerated={!!field.aiAssist}
+                      />
 
                       {field.aiAssist && (
                         (currentUser.role === 'senior' && draftStatus === 'senior_review') ||

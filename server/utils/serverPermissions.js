@@ -1,21 +1,13 @@
 import { schemas } from '../../src/config/schemas.js';
+import { findSchemaField } from '../../src/config/fieldSettings.js';
+import { canEditField } from '../../src/utils/permissions.js';
 
-// Mirrors src/utils/permissions.js's canEditField exactly. Imports the same schemas.js the
-// frontend uses (plain data + lucide-react component refs, no browser-only APIs — safe to import
-// under Node) so the aiAssist classification can never drift between client and server. This is
-// the server-side backstop for PUT /api/drafts/:id — the UI already disables locked fields and
-// filters the JSON edit-mode's bulk-apply, but nothing enforced it against a direct API call.
-function findField(pageType, fieldKey) {
-  const schema = schemas[pageType];
-  if (!schema) return null;
-  for (const section of schema.sections) {
-    const field = section.fields.find(f => f.key === fieldKey);
-    if (field) return field;
-  }
-  return null;
-}
-
-export function canEditFieldServer(pageType, fieldKey, { role, draftStatus, allowInternAiEdit, isDraftOwner = true }) {
+// The server-side backstop for PUT /api/drafts/:id: the UI already disables locked fields, but
+// nothing would stop a direct API call. Runs the frontend's own canEditField (permissions.js, plain
+// JS) on the same effective schema the form shows, so the two can never disagree.
+// `schema`: the page's effective schema (admin field settings applied - see
+// config/fieldSettings.js and repositories/fieldSettingsRepo.js); defaults to the built-in one.
+export function canEditFieldServer(pageType, fieldKey, { role, draftStatus, allowInternAiEdit, isDraftOwner = true }, schema = schemas[pageType]) {
   if (role === 'senior' || role === 'admin') return true;
 
   // An Intern may only edit drafts they own (see isDraftOwnerOrNotIntern in routes/drafts.js).
@@ -24,7 +16,9 @@ export function canEditFieldServer(pageType, fieldKey, { role, draftStatus, allo
   const internHasTurn = draftStatus === 'intern_editing';
   if (!internHasTurn) return false;
 
-  const field = findField(pageType, fieldKey);
-  if (field?.aiAssist && !field.internWritable) return !!allowInternAiEdit;
-  return true;
+  // A field the Admin has hidden isn't on the Intern's form, so nothing of theirs may change it.
+  if (schema?.hiddenFieldKeys?.includes(fieldKey)) return false;
+  const field = findSchemaField(schema, fieldKey);
+  if (!field) return true;
+  return canEditField(field, { role, draftStatus, allowInternAiEdit, isDraftOwner });
 }

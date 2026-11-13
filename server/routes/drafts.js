@@ -16,6 +16,8 @@ import { createNotification, listDraftRemarks } from '../repositories/notificati
 import { publishDraftToWordPress } from '../integrations/wordpressClient.js';
 import { generateImages, getGenerationStatus, getImageHistory, regenerateImage, getCurrentPrompt, patchPrompt, deleteImage } from '../integrations/imagePipelineClient.js';
 import { upsertDirectoryEntry } from '../repositories/directoryRepo.js';
+import { getEffectiveSchemas } from '../repositories/fieldSettingsRepo.js';
+import { aiFieldsOf, fieldsOutOfInternReach } from '../../src/config/fieldSettings.js';
 
 export const draftsRouter = Router();
 
@@ -145,6 +147,7 @@ draftsRouter.put('/:id', asyncRoute(async (req, res) => {
     isDraftOwner: isDraftOwnerOrNotIntern(req.currentUser, draft)
   };
 
+  const schema = (await getEffectiveSchemas())[draft.page_type];
   const safeFormData = { ...draft.form_data };
   const skippedKeys = [];
   let appliedChanges = 0;
@@ -152,7 +155,7 @@ draftsRouter.put('/:id', asyncRoute(async (req, res) => {
     const incoming = formData[key];
     const changed = JSON.stringify(incoming) !== JSON.stringify(draft.form_data[key]);
     if (!changed) return;
-    if (canEditFieldServer(draft.page_type, key, permissionCtx)) {
+    if (canEditFieldServer(draft.page_type, key, permissionCtx, schema)) {
       safeFormData[key] = incoming;
       appliedChanges++;
     } else {
@@ -268,8 +271,8 @@ draftsRouter.patch('/:id/assign', asyncRoute(async (req, res) => {
   res.json({ draft: updated });
 }));
 
-// Batch-generates every listed AI field (client-supplied — schemas.js is the frontend's single
-// source of truth for aiAssist field metadata, see Phase 4 plan note), merges the results into
+// Batch-generates the listed AI fields (only those the Admin's field settings make AI-generated,
+// with label and instructions taken from those settings), merges the results into
 // the draft's form data, and auto-transitions status to senior_review. Used for both the
 // Intern's initial "Generate All AI Fields" (onlyEmpty: false) and the post-revert
 // "Generate Empty Fields" (onlyEmpty: true) — the latter must check emptiness against this
@@ -295,13 +298,22 @@ draftsRouter.post(
     // The "Generate All AI Fields" button is only enabled client-side once every non-AI required
     // field is filled — enforced here too so a direct API call can't trigger generation grounded
     // in incomplete facts.
-    if (!validateFactsOnly(draft.form_data, draft.page_type).isValid) {
+    const schema = (await getEffectiveSchemas())[draft.page_type];
+    const skipField = fieldsOutOfInternReach({ role: req.currentUser.role, draftStatus: draft.status });
+    if (!validateFactsOnly(draft.form_data, draft.page_type, { schema, skipField }).isValid) {
       const err = new Error('Required facts fields are not all filled in yet'); err.status = 409; throw err;
     }
 
-    const { fields, facts, onlyEmpty } = req.body || {};
-    if (!Array.isArray(fields) || !fields.length) {
+    const { fields: requested, facts, onlyEmpty } = req.body || {};
+    if (!Array.isArray(requested) || !requested.length) {
       const err = new Error('fields must be a non-empty array'); err.status = 400; throw err;
+    }
+    // Only fields the Admin's settings make AI-generated, with their label and instructions from
+    // those settings - whatever else the request says.
+    const requestedKeys = new Set(requested.map(f => f?.fieldKey));
+    const fields = aiFieldsOf(schema).filter(f => requestedKeys.has(f.fieldKey));
+    if (!fields.length) {
+      const err = new Error('None of these fields is set to be AI-generated'); err.status = 400; throw err;
     }
 
     const { values, failures } = await generateAllAiFields({
@@ -409,7 +421,7 @@ draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
     if (targetStatus === draft.status) {
       const err = new Error('This draft is already in that status'); err.status = 409; throw err;
     }
-    if (targetStatus === 'approved' && !validateState(draft.form_data, draft.page_type).isValid) {
+    if (targetStatus === 'approved' && !validateState(draft.form_data, draft.page_type, { schema: (await getEffectiveSchemas())[draft.page_type] }).isValid) {
       const err = new Error('This draft still has required fields missing'); err.status = 409; throw err;
     }
 
@@ -450,7 +462,11 @@ draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
   // An Intern can only hand off a draft that is theirs - without this, any Intern could push
   // another Intern's half-finished specialization to the Senior.
   assertCanActAsOwner(req.currentUser, draft);
-  if (spec.requiresComplete && !validateState(draft.form_data, draft.page_type).isValid) {
+  // An Intern sending on isn't held up by fields only a Senior/Admin may fill; approval still is.
+  if (spec.requiresComplete && !validateState(draft.form_data, draft.page_type, {
+    schema: (await getEffectiveSchemas())[draft.page_type],
+    skipField: fieldsOutOfInternReach({ role: req.currentUser.role, draftStatus: draft.status })
+  }).isValid) {
     const err = new Error('This draft still has required fields missing'); err.status = 409; throw err;
   }
 

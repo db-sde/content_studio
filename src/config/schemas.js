@@ -841,15 +841,17 @@ const fieldPasses = (state, field) => {
 };
 
 // Validates the state and returns an object: { isValid: boolean, errors: string[], invalidFields: Record<string, boolean> }
-export const validateState = (state, pageType) => {
-  const schema = schemas[pageType];
+// Options: `schema` - the page's effective schema with the admin's field settings applied (see
+// fieldSettings.js; defaults to the built-in one); `skipField(field)` - fields not to require here
+// (e.g. ones an Intern isn't allowed to fill, when an Intern is sending the draft on).
+export const validateState = (state, pageType, { schema = schemas[pageType], skipField } = {}) => {
   const errors = [];
   const invalidFields = {};
   if (!schema) return { isValid: true, errors, invalidFields };
 
   schema.sections.forEach(sec => {
     sec.fields.forEach(field => {
-      if (!field.required) return;
+      if (!field.required || skipField?.(field)) return;
       if (!fieldPasses(state, field)) {
         invalidFields[field.key] = true;
         if (field.type === 'REPEATER') {
@@ -873,15 +875,15 @@ export const validateState = (state, pageType) => {
 // `required` flag — used to gate the Intern's "Generate All AI Fields" button, which by
 // definition must be clickable before any AI field has content. validateState (used for the
 // final Download/Validate flow) still requires AI fields once they've actually been generated.
-export const validateFactsOnly = (state, pageType) => {
-  const schema = schemas[pageType];
+// Same options as validateState.
+export const validateFactsOnly = (state, pageType, { schema = schemas[pageType], skipField } = {}) => {
   const errors = [];
   const invalidFields = {};
   if (!schema) return { isValid: true, errors, invalidFields };
 
   schema.sections.forEach(sec => {
     sec.fields.forEach(field => {
-      if (!field.required || field.aiAssist) return;
+      if (!field.required || field.aiAssist || skipField?.(field)) return;
       if (!fieldPasses(state, field)) {
         invalidFields[field.key] = true;
         if (field.type === 'REPEATER') {
@@ -905,8 +907,7 @@ export const validateFactsOnly = (state, pageType) => {
 // everything) lets a caller exclude fields the current viewer has no say over right now — e.g. an
 // Intern's AI-generated fields, which stay empty until generation and aren't theirs to fill —
 // so "100%" means "done with what's actually mine to do" rather than "the whole document exists."
-export const calculateProgress = (state, pageType, isFieldRelevant = () => true) => {
-  const schema = schemas[pageType];
+export const calculateProgress = (state, pageType, isFieldRelevant = () => true, schema = schemas[pageType]) => {
   if (!schema) return 0;
 
   let requiredCount = 0;

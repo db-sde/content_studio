@@ -193,6 +193,31 @@ export function mapToWordPress(acf, pageType) {
   return { fields, linkedNames, skipped };
 }
 
+// Where a Content Studio field lands on WordPress - for the tags under every field in the editor
+// and the Field Settings page. kind: 'sent' (wpKeys = the WordPress field names it fills),
+// 'internal' (notes for the AI, never sent), 'linked' (sent as the linked page's ID) or
+// 'featured_image' (not sent - attach it in WordPress). `liveFieldNames`: the site's own ACF field
+// names when known; each wpKey is then marked present or missing (aliases count, see FIELD_ALIASES).
+export function wordpressTargetOf(pageType, field, liveFieldNames = null) {
+  const key = field.key;
+  if (INTERNAL_ONLY_FIELDS.has(key)) return { kind: 'internal', wpKeys: [] };
+  if (key === 'hero_image') return { kind: 'featured_image', wpKeys: [] };
+  let wpKeys;
+  if (LINKED_FIELDS[pageType]?.[key]) wpKeys = [key];
+  else if (key === 'fee_plans') wpKeys = ['fee_plans', ...Object.values(FEE_TIER_FIELDS[pageType] || {})];
+  else if (FIELD_MAPS[pageType]?.[key]) wpKeys = Object.keys(FIELD_MAPS[pageType][key](field.type === 'REPEATER' ? [] : ''));
+  else wpKeys = [key];
+
+  const target = { kind: LINKED_FIELDS[pageType]?.[key] ? 'linked' : 'sent', wpKeys };
+  if (liveFieldNames) {
+    const live = new Set(liveFieldNames);
+    const resolved = wpKeys.map(k => (live.has(k) ? k : (FIELD_ALIASES[k] || []).find(a => live.has(a)) || null));
+    target.wpKeys = wpKeys.map((k, i) => resolved[i] || k);
+    target.missing = wpKeys.filter((_, i) => !resolved[i]);
+  }
+  return target;
+}
+
 const typesOf = (schema) => [].concat(schema?.type || []);
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 const isBlank = (v) => v === null || v === undefined || (typeof v === 'string' && !v.trim());

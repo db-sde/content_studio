@@ -179,6 +179,19 @@ async function getAcfSchema(slug) {
   return schema;
 }
 
+// The site's ACF field names for a page type, for the "sent to WordPress" tags - null when WordPress
+// isn't set up here or doesn't answer (the tags then just show where each field would go).
+export async function getWordPressFieldNames(pageType) {
+  try {
+    assertWordpressConfigured();
+    const schema = await getAcfSchema(postTypeSlug(pageType));
+    return schema?.properties ? Object.keys(schema.properties) : null;
+  } catch (e) {
+    console.warn(`[wordpress] couldn't read the ${pageType} field list:`, e.message || e);
+    return null;
+  }
+}
+
 export function __clearWordPressCachesForTests() {
   schemaCache.clear();
 }

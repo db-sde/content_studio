@@ -9,6 +9,8 @@ import { generateAndEvaluateField } from '../ai/orchestrator.js';
 import { computeCostUsd, usdToInr } from '../ai/pricing.js';
 import { config } from '../config.js';
 import { getDraftById } from '../repositories/draftsRepo.js';
+import { getEffectiveSchemas } from '../repositories/fieldSettingsRepo.js';
+import { aiFieldsOf } from '../../src/config/fieldSettings.js';
 
 export const aiRouter = Router();
 
@@ -27,7 +29,7 @@ aiRouter.post(
   rateLimit({ windowMs: 5 * 60 * 1000, max: 40, keyFn: (req) => req.currentUser.id }),
   requireAiBudget,
   asyncRoute(async (req, res) => {
-    const { draftId, pageType, fieldKey, fieldLabel, fieldInstructions, outputFormat, facts, mode, existingContent } = req.body || {};
+    const { draftId, pageType, fieldKey, fieldLabel, fieldInstructions, facts, mode, existingContent } = req.body || {};
 
     if (!draftId || !DRAFT_ID_RE.test(draftId)) {
       const err = new Error('Invalid or missing draftId'); err.status = 400; throw err;
@@ -44,13 +46,19 @@ aiRouter.post(
       const err = new Error('This draft is not in review with you right now'); err.status = 409; throw err;
     }
 
+    // Only a field the Admin's settings make AI-generated, written to those settings' instructions.
+    const setting = aiFieldsOf((await getEffectiveSchemas())[draft.page_type]).find(f => f.fieldKey === fieldKey);
+    if (!setting) {
+      const err = new Error('This field is not set to be AI-generated'); err.status = 400; throw err;
+    }
+
     const result = await generateAndEvaluateField({
       draftId,
-      pageType,
+      pageType: draft.page_type,
       fieldKey,
-      fieldLabel,
-      fieldInstructions: fieldInstructions || '',
-      outputFormat: outputFormat === 'markdown' || outputFormat === 'plain-short' ? outputFormat : 'plain',
+      fieldLabel: setting.fieldLabel || fieldLabel,
+      fieldInstructions: setting.fieldInstructions || fieldInstructions || '',
+      outputFormat: setting.outputFormat,
       facts: facts && typeof facts === 'object' ? facts : {},
       mode: mode === 'regenerate' ? 'regenerate' : 'generate',
       existingContent: existingContent || ''
@@ -85,19 +93,20 @@ aiRouter.post('/test-generate', rateLimit({ windowMs: 5 * 60 * 1000, max: 10, ke
   });
 }));
 
-// Rough pre-generate estimate for the Intern, before any API call is made. Field counts per page
-// type mirror src/config/schemas.js's aiAssist fields (backend doesn't import frontend code, so
-// these are a coarse, occasionally-drifting approximation, not a live count): `seo` is the SEO
-// title + meta description (Claude only - checked by rules, see ai/seoChecks.js), `narrative` is
-// everything else (Claude + one GPT evaluation). Claude figures were measured on real pages with
-// prompt caching on (Oct 2026; output includes Sonnet's thinking, which varies a lot per call);
-// the GPT figures are the old measured size less what compact JSON and caching save. Retries
-// aren't included.
-const AI_ASSIST_FIELD_COUNTS = {
-  university: { seo: 2, narrative: 8 },
-  course: { seo: 2, narrative: 7 },
-  specialization: { seo: 2, narrative: 7 }
-};
+// Rough pre-generate estimate for the Intern, before any API call is made. Counts this page type's
+// AI fields under the Admin's current field settings: `seo` is the SEO title + meta description
+// (Claude only - checked by rules, see ai/seoChecks.js), `narrative` is everything else (Claude +
+// one GPT evaluation). Claude figures were measured on real pages with prompt caching on (Oct 2026;
+// output includes Sonnet's thinking, which varies a lot per call); the GPT figures are the old
+// measured size less what compact JSON and caching save. Retries aren't included.
+const SEO_FIELD_KEYS = new Set(['seo_title', 'meta_description']);
+async function aiFieldCounts(pageType) {
+  const schema = (await getEffectiveSchemas())[pageType];
+  if (!schema) return null;
+  const keys = aiFieldsOf(schema).map(f => f.fieldKey);
+  const seo = keys.filter(k => SEO_FIELD_KEYS.has(k)).length;
+  return { seo, narrative: keys.length - seo };
+}
 const SHARED_PREFIX_TOKENS = 4000; // system prompt + the page's facts: written to the cache once, then read by every field
 const NARRATIVE_FIELD_TOKENS = { input: 110, output: 500 };
 const SEO_FIELD_TOKENS = { input: 180, output: 130 }; // 3 short versions per call
@@ -105,7 +114,7 @@ const EVALUATOR_TOKENS = { input: 750, cacheRead: 1700, output: 180 };
 
 aiRouter.get('/pricing-estimate', asyncRoute(async (req, res) => {
   const { pageType } = req.query;
-  const counts = AI_ASSIST_FIELD_COUNTS[pageType];
+  const counts = await aiFieldCounts(pageType);
   if (!counts) {
     const err = new Error('Unknown or missing pageType'); err.status = 400; throw err;
   }
