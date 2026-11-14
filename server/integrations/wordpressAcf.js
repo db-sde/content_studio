@@ -14,8 +14,12 @@
 
 // Content Studio-only fields: notes that exist to feed facts to the AI, never page content. Left
 // out quietly (not reported as "not published").
+// Placement Stats too: the site has no field for them on any page type (on university pages
+// placement_highlights is the hiring-partner chips, not stats) - they're the facts the AI writes
+// Placement Content from.
 const INTERNAL_ONLY_FIELDS = new Set([
-  'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes'
+  'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes',
+  'placement_stats'
 ]);
 
 // Linked University / Linked Course hold a name in Content Studio; WordPress wants the post ID of
@@ -106,6 +110,36 @@ const FEE_TIER_FIELDS = {
   specialization: { semester: 'semester_plan_value', annual: 'annual_plan_value', one_time: 'one-time_payment_value' }
 };
 
+// "Top Hiring Partners": the theme shows each <li> of its own field as a company chip - on university
+// pages that field is placement_highlights. Typed as "Infosys, KPMG, etc." or one per line; becomes
+// <ul><li>Infosys</li><li>KPMG</li></ul> (as the Micro Parser sends it). Left out while empty, so a
+// re-publish never wipes partners entered in WordPress by hand.
+export const HIRING_PARTNERS_FIELD = { university: 'placement_highlights', course: 'top_hiring_partners_course', specialization: 'hiring_partners_specialization' };
+
+export function partnersToHtmlList(value) {
+  const raw = String(value || '');
+  const lines = /<li\b/i.test(raw)
+    ? [...raw.matchAll(/<li\b[^>]*>([\s\S]*?)<\/li>/gi)].map(m => htmlToText(m[1]))
+    : decodeEntities(raw.replace(/<\/(p|div)>|<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '')).split(/\n|•/);
+  const names = lines.flatMap(line => {
+    const parts = line.split(/[,;]/);
+    // "A, B and C": the last "and" separates names; a lone "Procter and Gamble" stays whole.
+    if (parts.length > 1) {
+      const last = parts.pop();
+      const and = /\s+and\s+/i.exec(last);
+      parts.push(...(and ? [last.slice(0, and.index), last.slice(and.index + and[0].length)] : [last]));
+    }
+    return parts;
+  }).map(n => n.replace(/^\s*(?:[-*–]|\d+[.)])\s*/, '').replace(/\betc\.?\s*$/i, '').trim().replace(/[.,;:]+$/, '').trim());
+  const seen = new Set();
+  const unique = names.filter(n => n && !seen.has(n.toLowerCase()) && seen.add(n.toLowerCase()));
+  return unique.length ? `<ul>${unique.map(n => `<li>${escapeHtml(n)}</li>`).join('')}</ul>` : '';
+}
+const hiringPartners = (pageType) => (value) => {
+  const html = partnersToHtmlList(value);
+  return html ? { [HIRING_PARTNERS_FIELD[pageType]]: html } : {};
+};
+
 // Per page type: what each Content Studio field becomes on WordPress. Each entry gets the field's
 // value and returns { wpKey: value, ... } to send in its place (an empty object = not sent).
 const toHtmlList = (wpKey, titleKey, descKey) => (rows) => ({ [wpKey]: rowsToHtmlList(rows, titleKey, descKey) });
@@ -122,7 +156,7 @@ const FIELD_MAPS = {
   university: {
     facts: toHtmlList('facts_content', 'fact_title', 'fact_description'),
     exam_details: remapRows('examination_cards', { detail_label: 'exam_card_title', detail_value: 'exam_card_description' }),
-    placement_stats: toHtmlList('placement_highlights', 'stat_label', 'stat_value'),
+    hiring_partners: hiringPartners('university'),
     emi_partners: (rows) => ({ partner_banks_names: (Array.isArray(rows) ? rows : []).map(r => htmlToText(r?.bank_name)).filter(Boolean).join(', ') }),
     faculty_members: (rows) => ({
       // The site's repeater has only name + designation; fold program and qualification in.
@@ -136,6 +170,7 @@ const FIELD_MAPS = {
     // WordPress renamed the course page's validity field to program_validity (as on specialization
     // pages); a site still on the old name gets it as validity - see FIELD_ALIASES.
     validity: (value) => ({ program_validity: value }),
+    hiring_partners: hiringPartners('course'),
     // course has a highlights repeater of its own AND a single-block copy for the summary display.
     highlights: (rows) => ({ highlights: rows, highlights_section_content: rowsToHtmlList(rows, 'highlight_title', 'highlight_description') }),
     eligibility_content: eligibilityRows,
@@ -146,6 +181,7 @@ const FIELD_MAPS = {
     // "Starting from ₹ <specialization_lowest_emi_strats_from> /month" - which stayed blank because
     // nothing filled that field. Same figure; the box adds the ₹ and /month itself, so just the number.
     emi_amount: (value) => ({ emi_amount: value, specialization_lowest_emi_strats_from: emiFigure(value) }),
+    hiring_partners: hiringPartners('specialization'),
     highlights: toHtmlList('highlights_content', 'highlight_title', 'highlight_description'),
     eligibility_content: eligibilityRows,
     exam_content: rename('examination_content'),
@@ -205,7 +241,8 @@ export function wordpressTargetOf(pageType, field, liveFieldNames = null) {
   let wpKeys;
   if (LINKED_FIELDS[pageType]?.[key]) wpKeys = [key];
   else if (key === 'fee_plans') wpKeys = ['fee_plans', ...Object.values(FEE_TIER_FIELDS[pageType] || {})];
-  else if (FIELD_MAPS[pageType]?.[key]) wpKeys = Object.keys(FIELD_MAPS[pageType][key](field.type === 'REPEATER' ? [] : ''));
+  // A sample value, not an empty one: some fields send nothing at all while empty (hiring partners).
+  else if (FIELD_MAPS[pageType]?.[key]) wpKeys = Object.keys(FIELD_MAPS[pageType][key](field.type === 'REPEATER' ? [] : 'Sample'));
   else wpKeys = [key];
 
   const target = { kind: LINKED_FIELDS[pageType]?.[key] ? 'linked' : 'sent', wpKeys };

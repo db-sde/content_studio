@@ -194,6 +194,7 @@ export const schemas = {
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
           { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
+          { key: 'hiring_partners', type: 'TEXTAREA', label: 'Top Hiring Partners', placeholder: 'Company names, separated by commas or one per line - e.g. Infosys, KPMG, Deloitte', rows: 2 },
           { key: 'placement_additional_notes', type: 'TEXTAREA', label: 'Additional Notes', placeholder: 'Any extra placement facts not captured above - the AI will use these when writing Placement Content', rows: 3 },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
@@ -359,6 +360,7 @@ export const schemas = {
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
           { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
+          { key: 'hiring_partners', type: 'TEXTAREA', label: 'Top Hiring Partners', placeholder: 'Company names, separated by commas or one per line - e.g. Infosys, KPMG, Deloitte', rows: 2 },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
@@ -528,6 +530,7 @@ export const schemas = {
         fields: [
           { key: 'placement_heading', type: 'TEXT_INPUT', label: 'Placement Section Heading', placeholder: 'e.g. Placement Support' },
           { key: 'placement_stats', type: 'REPEATER', label: 'Placement Stats', subfields: PLACEMENT_STATS_SUBFIELDS },
+          { key: 'hiring_partners', type: 'TEXTAREA', label: 'Top Hiring Partners', placeholder: 'Company names, separated by commas or one per line - e.g. Infosys, KPMG, Deloitte', rows: 2 },
           { key: 'placement_content', type: 'RICH_TEXT', label: 'Placement Content', placeholder: 'Describe placement support and outcomes', aiAssist: { instructions: 'Describe placement support and outcomes, grounded only in the facts provided (do not invent statistics).' } }
         ]
       },
@@ -593,6 +596,8 @@ export const schemas = {
 const OPTIONAL_FIELD_KEYS = new Set([
   'seo_title', 'meta_description',
   'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes',
+  // Shown as company chips on the page when filled; many programs don't name any.
+  'hiring_partners',
   // Section paragraphs and a few extras the WordPress course/specialization pages show, typed in by
   // hand when there's something to say - never required, never AI-written.
   'fee_heading', 'validity', 'accreditation_paragraph', 'eligibility_criteria_paragraph', 'fee_structure_paragraph',

@@ -12,7 +12,7 @@ import https from 'node:https';
 import express from 'express';
 import { config } from '../server/config.js';
 import { publishDraftToWordPress, __clearWordPressCachesForTests, __setChallengeRetryDelayForTests } from '../server/integrations/wordpressClient.js';
-import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure } from '../server/integrations/wordpressAcf.js';
+import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure, partnersToHtmlList } from '../server/integrations/wordpressAcf.js';
 import { transformToACF } from '../src/config/schemas.js';
 import { startTestApp, completeSpecializationFormData } from './helpers/testApp.js';
 
@@ -127,6 +127,7 @@ function fullSpecialization() {
     exam_content: '<p>Exams are held online.</p>',
     admission_steps_list: [{ step_title: 'Apply', step_description: 'Fill the form' }],
     placement_stats: [{ stat_label: 'Hiring partners', stat_value: '300+' }],
+    hiring_partners: 'IBM, KPMG, Larsen & Toubro, etc.',
     certificate_heading: 'Your Certificate',
     emi_amount: 'INR 6,917 /-'
   });
@@ -175,7 +176,10 @@ test("a fully filled specialization passes the site's own field rules: created a
 
   // What has nowhere to go is reported, not sent.
   const skipped = result.skipped.join(' | ');
-  for (const k of ['hero_image', 'admission_steps_list', 'placement_stats', 'certificate_heading']) assert.match(skipped, new RegExp(k));
+  for (const k of ['hero_image', 'admission_steps_list', 'certificate_heading']) assert.match(skipped, new RegExp(k));
+  assert.doesNotMatch(skipped, /placement_stats/, 'the stats are facts for the AI, not a field WordPress lacks');
+  // Hiring partners: the company chips, from their own field.
+  assert.equal(stored.acf.hiring_partners_specialization, '<ul><li>IBM</li><li>KPMG</li><li>Larsen &amp; Toubro</li></ul>');
   for (const k of ['highlights', 'exam_details', 'syllabus_subjects', 'admission_steps_list', 'placement_stats', 'certificate_heading', 'hero_image']) {
     assert.ok(!(k in stored.acf), `${k} must not be sent`);
   }
@@ -221,13 +225,16 @@ test("course and university fields map onto the site's own (and pass its field r
     facts: [{ fact_title: 'Founded', fact_description: '1981' }],
     exam_details: [{ detail_label: 'Mode', detail_value: 'Online' }],
     placement_stats: [{ stat_label: 'Partners', stat_value: '500+' }],
+    hiring_partners: 'Amazon\nDeloitte, etc.',
     emi_partners: [{ bank_name: 'HDFC', emi_terms: '0%' }, { bank_name: 'ICICI', emi_terms: '' }],
     faculty_members: [{ member_name: 'Dr. A', member_program: 'MBA', member_designation: 'Professor', member_qualification: 'PhD' }]
   }, 'university');
   const u = conformToSchema(uni.fields, SCHEMAS.university);
   assert.equal(u.fields.facts_content, '<ul><li><strong>Founded</strong>: 1981</li></ul>');
   assert.deepEqual(u.fields.examination_cards, [{ exam_card_title: 'Mode', exam_card_description: 'Online' }]);
-  assert.equal(u.fields.placement_highlights, '<ul><li><strong>Partners</strong>: 500+</li></ul>');
+  // placement_highlights is the page's "Top Hiring Partners" chips: company names, never the stats.
+  assert.equal(u.fields.placement_highlights, '<ul><li>Amazon</li><li>Deloitte</li></ul>');
+  assert.ok(!u.skipped.some(s => /placement_stats/.test(s)));
   assert.equal(u.fields.partner_banks_names, 'HDFC, ICICI');
   assert.deepEqual(u.fields.faculty_members, [{ member_name: 'Dr. A', member_designation: 'Professor, MBA, PhD' }]);
   assert.ok(!('about_additional_notes' in u.fields) && !u.skipped.some(s => /additional_notes/.test(s)), 'AI-only notes are never published, and not reported as missing');
@@ -265,6 +272,24 @@ test('hand-written section paragraphs reach the fields the site has, under whate
   for (const k of ['fee_section_paragraph', 'other_specializations_section_paragraph', 'syllabus_section_paragraph', 'eligibility_criteria_paragraph']) assert.ok(spec.fields[k], k);
   assert.equal(spec.fields.job_profiles_section_paragraph, '');
   assert.deepEqual(spec.skipped, []);
+});
+
+test('Top Hiring Partners: typed any common way, sent as chips to each page type\'s own field - never blank', () => {
+  const cases = [
+    ['Infosys, Honeywell, Hitachi, Johnson Controls, ICICI Bank, etc.', ['Infosys', 'Honeywell', 'Hitachi', 'Johnson Controls', 'ICICI Bank']],
+    ['IBM\nKPMG\n- Larsen &amp; Toubro\n2. Adecco, etc', ['IBM', 'KPMG', 'Larsen &amp; Toubro', 'Adecco']],
+    ['<ul><li>Amazon</li><li>Deloitte</li></ul>', ['Amazon', 'Deloitte']],
+    ['Wipro, HCL and Procter and Gamble', ['Wipro', 'HCL', 'Procter and Gamble']],
+    ['Infosys, infosys', ['Infosys']]
+  ];
+  for (const [typed, names] of cases) assert.equal(partnersToHtmlList(typed), `<ul>${names.map(n => `<li>${n}</li>`).join('')}</ul>`, typed);
+  for (const [pageType, wpKey] of [['university', 'placement_highlights'], ['course', 'top_hiring_partners_course'], ['specialization', 'hiring_partners_specialization']]) {
+    const sent = conformToSchema(mapToWordPress({ hiring_partners: 'TCS, Wipro' }, pageType).fields, SCHEMAS[pageType]);
+    assert.equal(sent.fields[wpKey], '<ul><li>TCS</li><li>Wipro</li></ul>', pageType);
+    assert.deepEqual(sent.skipped, []);
+    const empty = mapToWordPress({ hiring_partners: ' ', placement_stats: [{ stat_label: 'Avg', stat_value: '8 LPA' }] }, pageType);
+    assert.deepEqual(empty.fields, {}, `${pageType}: nothing sent - partners typed into WordPress stay`);
+  }
 });
 
 test("the schema check leaves out what still doesn't fit instead of breaking the publish", () => {
@@ -422,7 +447,7 @@ test('Publish to WordPress (route): what had no place is shown; a half-made page
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     assert.equal(ok.body.draft.wordpress_post_id, 900, 'the retry filled the same page');
     assert.equal(wp.posts.size, 1, 'no duplicate page');
-    assert.match(ok.body.skipped.join(' | '), /placement_stats/);
+    assert.match(ok.body.skipped.join(' | '), /admission_steps_list/);
   } finally {
     await t.close();
   }
