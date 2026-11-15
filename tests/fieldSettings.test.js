@@ -123,7 +123,8 @@ test('WordPress tags: where each field lands, and whether the site has that fiel
   assert.deepEqual(v, { kind: 'sent', wpKeys: ['validity'], missing: [] }, 'an older site\'s name for it counts');
   assert.deepEqual(wordpressTargetOf('course', course('job_roles_&_salary_paragraph'), live).wpKeys, ['job_roles_salary_paragraph']);
   const syllabus = wordpressTargetOf('course', course('syllabus_section_paragraph'), live);
-  assert.deepEqual(syllabus.missing, ['syllabus_section_paragraph']);
+  assert.deepEqual(syllabus.missing, ['course_syllabus_description'], 'course pages keep this paragraph in their own field');
+  assert.deepEqual(wordpressTargetOf('course', course('total_fee')).wpKeys, ['total_fee', 'best_price_value'], 'a field that also fills another shows both');
   assert.equal(wordpressTagOf(syllabus, true).tone, 'warn');
   assert.match(wordpressTagOf(syllabus, true).text, /^Missing on WordPress/);
   assert.equal(wordpressTagOf(wordpressTargetOf('course', course('about_content'), live), true).text, '→ WordPress: about_content');

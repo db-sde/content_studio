@@ -17,9 +17,11 @@
 // Placement Stats too: the site has no field for them on any page type (on university pages
 // placement_highlights is the hiring-partner chips, not stats) - they're the facts the AI writes
 // Placement Content from.
+// The Admission Steps list likewise feeds the AI's Admission Steps text (the site has no list field
+// for it), and specialization pages no longer have a certificate heading.
 const INTERNAL_ONLY_FIELDS = new Set([
   'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes',
-  'placement_stats'
+  'placement_stats', 'admission_steps_list', 'certificate_heading'
 ]);
 
 // Linked University / Linked Course hold a name in Content Studio; WordPress wants the post ID of
@@ -150,14 +152,29 @@ const remapRows = (wpKey, keyMap) => (rows) => ({
 const eligibilityRows = (rows) => ({ eligibility_content: htmlToRows(rows, 'eligibility_title', 'eligibility_description') });
 
 // "INR 6,917 /-" -> "6,917" (the first amount in the text; '' if there is none).
-export const emiFigure = (value) => (/\d[\d,]*(?:\.\d+)?/.exec(htmlToText(value)) || [''])[0];
+export const emiFigure = (value) => (/\d[\d,]*(?:\.\d+)?/.exec(htmlToText(value)) || [''])[0].replace(/,$/, '');
+
+// The page prints the EMI amount followed by "/month", so it must be a bare amount: "INR 6,917 /-" or
+// "₹7,078/month" -> "₹ 6,917" (as the WordPress team enters it). '' when there's no amount.
+export const emiDisplay = (value) => {
+  const figure = emiFigure(value);
+  return figure ? `₹ ${figure}` : '';
+};
+
+// Partner banks / lenders, typed like hiring partners: chips in that page type's own field.
+const BANKS_FIELD = { university: 'partner_banks_names', course: 'partner_banks_course', specialization: 'partner_banks_specialization' };
+const partnerBanks = (pageType) => (value) => {
+  const html = partnersToHtmlList(value);
+  return html ? { [BANKS_FIELD[pageType]]: html } : {};
+};
 
 const FIELD_MAPS = {
   university: {
     facts: toHtmlList('facts_content', 'fact_title', 'fact_description'),
     exam_details: remapRows('examination_cards', { detail_label: 'exam_card_title', detail_value: 'exam_card_description' }),
     hiring_partners: hiringPartners('university'),
-    emi_partners: (rows) => ({ partner_banks_names: (Array.isArray(rows) ? rows : []).map(r => htmlToText(r?.bank_name)).filter(Boolean).join(', ') }),
+    // The EMI partners' bank names, as chips (the terms stay facts for the AI's EMI text).
+    emi_partners: (rows) => partnerBanks('university')((Array.isArray(rows) ? rows : []).map(r => htmlToText(r?.bank_name)).filter(Boolean).join('\n')),
     faculty_members: (rows) => ({
       // The site's repeater has only name + designation; fold program and qualification in.
       faculty_members: (Array.isArray(rows) ? rows : []).map(r => ({
@@ -171,6 +188,10 @@ const FIELD_MAPS = {
     // pages); a site still on the old name gets it as validity - see FIELD_ALIASES.
     validity: (value) => ({ program_validity: value }),
     hiring_partners: hiringPartners('course'),
+    partner_banks: partnerBanks('course'),
+    emi_amount: (value) => ({ emi_amount: emiDisplay(value) }),
+    // On course pages the paragraph above the syllabus is course_syllabus_description.
+    syllabus_section_paragraph: rename('course_syllabus_description'),
     // course has a highlights repeater of its own AND a single-block copy for the summary display.
     highlights: (rows) => ({ highlights: rows, highlights_section_content: rowsToHtmlList(rows, 'highlight_title', 'highlight_description') }),
     eligibility_content: eligibilityRows,
@@ -180,8 +201,10 @@ const FIELD_MAPS = {
     // The page shows EMI twice: "EMI From <emi_amount>" at the top, and a No-Cost EMI box reading
     // "Starting from ₹ <specialization_lowest_emi_strats_from> /month" - which stayed blank because
     // nothing filled that field. Same figure; the box adds the ₹ and /month itself, so just the number.
-    emi_amount: (value) => ({ emi_amount: value, specialization_lowest_emi_strats_from: emiFigure(value) }),
+    emi_amount: (value) => ({ emi_amount: emiDisplay(value), specialization_lowest_emi_strats_from: emiFigure(value) }),
     hiring_partners: hiringPartners('specialization'),
+    partner_banks: partnerBanks('specialization'),
+    validity: (value) => ({ program_validity: value }),
     highlights: toHtmlList('highlights_content', 'highlight_title', 'highlight_description'),
     eligibility_content: eligibilityRows,
     exam_content: rename('examination_content'),
@@ -189,6 +212,56 @@ const FIELD_MAPS = {
     syllabus_subjects: (rows) => ({ academic_years: syllabusToYears(rows, { yearTitle: 'year_title', semesters: 'semesters', semesterTitle: 'semester_title', semesterSubjects: 'semester_subjects' }) })
   }
 };
+
+// WordPress fields filled from what the page already has, with no typing: per page type, app field
+// -> [WordPress field, value]. Sent only when there's a value, so a page never loses one entered by
+// hand in WordPress.
+const hasDigit = (v) => /\d/.test(htmlToText(v));
+const amountOf = (v) => Number((htmlToText(v).replace(/,/g, '').match(/\d+(?:\.\d+)?/) || [NaN])[0]);
+// "Lowest – highest" of the specialization fees, when there are at least two; one value if all equal.
+export function feeRange(rows) {
+  const fees = (Array.isArray(rows) ? rows : []).map(r => htmlToText(r?.specialization_details)).filter(hasDigit);
+  if (fees.length < 2) return '';
+  const sorted = [...fees].sort((a, b) => amountOf(a) - amountOf(b));
+  const [low, high] = [sorted[0], sorted[sorted.length - 1]];
+  return amountOf(low) === amountOf(high) ? low : `${low} – ${high}`;
+}
+const DERIVED = {
+  course: {
+    total_fee: [['best_price_value', (v) => (hasDigit(v) ? v : '')]],
+    duration: [['program_duration', (v) => v]],
+    syllabus_heading: [['course_syllabus_section_heading', (v) => v]],
+    specialization: [['course_amount_range', feeRange]]
+  },
+  specialization: {
+    total_fee: [['best_price_specialization', (v) => (hasDigit(v) ? v : '')]],
+    duration: [['duration_specialization', (v) => v]],
+    syllabus_heading: [['syllabus_section_heading', (v) => v]]
+  }
+};
+
+const SEND_ONLY_WHEN_FILLED = [
+  'nirf_rank', 'nirf_rank_course', 'emi_interest_rate_value', 'scholarship_facility', 'certificate_validity',
+  'specialization_hero_description', 'course_syllabus_description'
+];
+
+// Short values the page shows as a stat or badge. A placeholder ("N/A", "-") or the document's own
+// "not mentioned" wording would print as written, so those go as empty and the page hides them.
+const VALUE_FIELDS = new Set([
+  'program_validity', 'validity', 'certificate_validity', 'emi_amount', 'num_specializations', 'num_programs', 'nirf_rank',
+  'nirf_rank_course', 'naac_grade', 'ugc_status', 'ugc_approved', 'duration', 'starting_fee', 'total_fee', 'established_year',
+  'emi_interest_rate_value', 'course_amount_range', 'best_price_value', 'best_price_specialization', 'program_duration',
+  'duration_specialization', 'specialization_lowest_emi_strats_from'
+]);
+const PLACEHOLDER_RE = /^\s*(n\/?a|na|nil|none|null|not available|not applicable|not mentioned|not specified|-+|—)\s*\.?\s*$/i;
+const NOT_GIVEN_RE = /\bnot\s+(?:been\s+)?(?:mentioned|available|specified|applicable|offered|given|provided|disclosed|stated)\b|\bn\/a\b/i;
+export function cleanValue(key, value) {
+  if (!VALUE_FIELDS.has(key) || typeof value !== 'string') return value;
+  const text = htmlToText(value);
+  if (PLACEHOLDER_RE.test(text) || NOT_GIVEN_RE.test(text)) return '';
+  if (/^num_/.test(key) && !/[1-9]/.test(text)) return ''; // "0 (Not Offered)": none means empty
+  return value;
+}
 
 // Known differences (step 1). Returns { fields, linkedNames, skipped }: linkedNames are the
 // Linked University/Course names still to be turned into post IDs; skipped lists what isn't sent.
@@ -226,7 +299,33 @@ export function mapToWordPress(acf, pageType) {
     }
     Object.assign(fields, maps[key] ? maps[key](value) : { [key]: value });
   }
+  for (const [source, targets] of Object.entries(DERIVED[pageType] || {})) {
+    for (const [wpKey, derive] of targets) {
+      const value = derive(acf?.[source]);
+      if (!(wpKey in fields) && !isBlank(value) && !(Array.isArray(value) && !value.length)) fields[wpKey] = value;
+    }
+  }
+  // Optional fields added after many pages were already published: left out while empty, so a
+  // re-publish never blanks a value someone typed into WordPress directly.
+  for (const key of SEND_ONLY_WHEN_FILLED) if (key in fields && isBlank(fields[key])) delete fields[key];
+  for (const [key, value] of Object.entries(fields)) fields[key] = cleanValue(key, value);
   return { fields, linkedNames, skipped };
+}
+
+// The page's title on WordPress. Course and specialization names are often just the program ("Online
+// BA"), which several universities share; the title then leads with the university, as the
+// document's own title does ("Lovely Professional University Online BA").
+const BARE_PROGRAM_RE = /^(online|distance|executive|mba|mca|bba|bca|m\.?\s?com|b\.?\s?com|m\.?\s?sc|b\.?\s?sc|ma|ba|pgdm|dba|phd|m\.?\s?tech|b\.?\s?tech|pg|diploma|certificate)\b/i;
+const TITLE_FIELD = { university: 'university_name', course: 'program_name', specialization: 'spec_name' };
+const normalizeWords = (s) => htmlToText(s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
+export function pageTitle(pageType, formData) {
+  const name = htmlToText(formData?.[TITLE_FIELD[pageType]]);
+  const university = htmlToText(formData?.university_name);
+  if (pageType === 'university' || !name || !university || !BARE_PROGRAM_RE.test(name)) return name || 'Untitled';
+  const stem = university.replace(/\s+online$/i, '');
+  if (normalizeWords(name).includes(normalizeWords(stem))) return name;
+  const online = /\s+online$/i.test(university) || /^online\b/i.test(name);
+  return `${stem}${online ? ' Online' : ''} ${name.replace(/^online\s+/i, '')}`;
 }
 
 // Where a Content Studio field lands on WordPress - for the tags under every field in the editor
@@ -242,8 +341,12 @@ export function wordpressTargetOf(pageType, field, liveFieldNames = null) {
   if (LINKED_FIELDS[pageType]?.[key]) wpKeys = [key];
   else if (key === 'fee_plans') wpKeys = ['fee_plans', ...Object.values(FEE_TIER_FIELDS[pageType] || {})];
   // A sample value, not an empty one: some fields send nothing at all while empty (hiring partners).
-  else if (FIELD_MAPS[pageType]?.[key]) wpKeys = Object.keys(FIELD_MAPS[pageType][key](field.type === 'REPEATER' ? [] : 'Sample'));
+  else if (FIELD_MAPS[pageType]?.[key]) {
+    const sample = field.type === 'REPEATER' ? [Object.fromEntries((field.subfields || []).map(sf => [sf.key, 'Sample 1']))] : 'Sample 1';
+    wpKeys = Object.keys(FIELD_MAPS[pageType][key](sample));
+  }
   else wpKeys = [key];
+  for (const [wpKey] of DERIVED[pageType]?.[key] || []) wpKeys.push(wpKey);
 
   const target = { kind: LINKED_FIELDS[pageType]?.[key] ? 'linked' : 'sent', wpKeys };
   if (liveFieldNames) {
@@ -377,8 +480,8 @@ const normalizeTitle = (s) => htmlToText(s).toLowerCase().replace(/&/g, 'and').r
 // result. Several exact matches (e.g. "Online MCA" at different universities) are narrowed to the
 // one linked to `universityId` when given; still ambiguous or none -> null.
 export function pickLinkedPost(posts, name, universityId = null) {
-  const wanted = normalizeTitle(name);
-  let matches = (posts || []).filter(p => normalizeTitle(p?.title?.rendered ?? p?.title) === wanted);
+  const wanted = new Set([].concat(name).map(normalizeTitle));
+  let matches = (posts || []).filter(p => wanted.has(normalizeTitle(p?.title?.rendered ?? p?.title)));
   if (matches.length > 1 && universityId) {
     matches = matches.filter(p => [].concat(p?.acf?.linked_university ?? []).map(Number).includes(Number(universityId)));
   }

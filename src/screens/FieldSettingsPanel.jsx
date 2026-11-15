@@ -456,8 +456,11 @@ export function FieldSettingsPanel({ settings, onSettingsChange, wordpress, onWo
   const byKey = useMemo(() => new Map(overrides.map(o => [`${o.pageType}:${o.fieldKey}`, o])), [overrides]);
   const pageSchemas = useMemo(() => withCustomFields(customFields), [customFields]);
   const pageSchema = pageSchemas[pageType];
-  const customByKey = new Map(customFields.filter(c => c.pageType === pageType && !c.archivedAt).map(c => [c.fieldKey, c]));
-  const archived = customFields.filter(c => c.pageType === pageType && c.archivedAt);
+  // An added field the app has since made built-in (same WordPress field) is just that built-in field now.
+  const builtInKeys = new Set(schemas[pageType].sections.flatMap(s => s.fields.map(f => f.key)));
+  const ownCustom = customFields.filter(c => c.pageType === pageType && !builtInKeys.has(c.fieldKey));
+  const customByKey = new Map(ownCustom.filter(c => !c.archivedAt).map(c => [c.fieldKey, c]));
+  const archived = ownCustom.filter(c => c.archivedAt);
   const targets = wordpress?.targets?.[pageType] || {};
   const checkedLive = !!wordpress?.checkedLive?.[pageType];
   const available = wordpress?.available?.[pageType] || null;

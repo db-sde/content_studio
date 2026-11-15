@@ -11,8 +11,8 @@ import fs from 'node:fs';
 import https from 'node:https';
 import express from 'express';
 import { config } from '../server/config.js';
-import { publishDraftToWordPress, __clearWordPressCachesForTests, __setChallengeRetryDelayForTests } from '../server/integrations/wordpressClient.js';
-import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure, partnersToHtmlList } from '../server/integrations/wordpressAcf.js';
+import { publishDraftToWordPress, __clearWordPressCachesForTests, __setChallengeRetryDelayForTests, degreeOf } from '../server/integrations/wordpressClient.js';
+import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure, partnersToHtmlList, pageTitle } from '../server/integrations/wordpressAcf.js';
 import { transformToACF } from '../src/config/schemas.js';
 import { startTestApp, completeSpecializationFormData } from './helpers/testApp.js';
 
@@ -45,7 +45,8 @@ let server, wp;
 const requests = [];
 
 function resetWordPress() {
-  wp = { posts: new Map(), nextId: 900, linkable: { university: [], course: [] }, failWith: null, failFill: null, delayMs: 0, challengeOnce: new Set() };
+  // taxonomies: null = a site without the institution/program tags; { institution: [...], program: [...] } = with them.
+  wp = { posts: new Map(), nextId: 900, linkable: { university: [], course: [] }, failWith: null, failFill: null, delayMs: 0, challengeOnce: new Set(), taxonomies: null };
 }
 
 before(async () => {
@@ -67,10 +68,20 @@ before(async () => {
         return typeof body === 'string' ? res.type('html').send(body) : res.json(body);
       }
       const m = /^\/wp-json\/wp\/v2\/([a-z-]+)(?:\/(\d+))?$/.exec(req.path);
+      const terms = m && wp.taxonomies?.[m[1]];
+      if (terms) {
+        if (req.method === 'GET') return res.json(terms.filter(t => t.name.toLowerCase().includes(String(req.query.search || '').toLowerCase())));
+        const term = { id: 300 + terms.length, name: req.body.name, slug: req.body.name.toLowerCase().replace(/[^a-z0-9]+/g, '-') };
+        terms.push(term);
+        return res.status(201).json(term);
+      }
       const schema = m && SCHEMAS[m[1]];
       if (!schema) return res.status(404).json({ code: 'rest_no_route', message: 'No route was found matching the URL and request method.' });
       const [, type, id] = m;
-      if (req.method === 'OPTIONS') return res.json({ schema: { properties: { acf: schema } } });
+      if (req.method === 'OPTIONS') {
+        const tags = wp.taxonomies && type !== 'university' ? { institution: { type: 'array' }, program: { type: 'array' } } : {};
+        return res.json({ schema: { properties: { acf: schema, ...tags } } });
+      }
       if (req.method === 'GET' && id) {
         const post = wp.posts.get(Number(id));
         return post ? res.json({ id: post.id, status: post.status }) : res.status(404).json({ code: 'rest_post_invalid_id', message: 'Invalid post ID.' });
@@ -90,7 +101,7 @@ before(async () => {
           const problem = schema.properties[k] ? wpInvalid(v, schema.properties[k], `acf[${k}]`) : `acf[${k}] is not a valid property of Object.`;
           if (problem) return res.status(400).json({ code: 'rest_invalid_param', message: 'Invalid parameter(s): acf', data: { status: 400, params: { acf: problem } } });
         }
-        Object.assign(post, { status: req.body.status, title: req.body.title, acf: req.body.acf });
+        Object.assign(post, { status: req.body.status, title: req.body.title, acf: req.body.acf, institution: req.body.institution, program: req.body.program });
         return res.json({ id: post.id, status: post.status, link: `https://site.test/${type}/${post.id}` });
       }
       res.status(405).json({ code: 'rest_no_route', message: 'Method not allowed.' });
@@ -170,19 +181,57 @@ test("a fully filled specialization passes the site's own field rules: created a
   assert.deepEqual(stored.acf.fee_plans, [{ plan_name: 'Semester Plan', plan_amount: 'INR 24,750' }, { plan_name: 'One-time payment', plan_amount: 'INR 94,000' }]);
   assert.equal(stored.acf.semester_plan_value, 'INR 24,750');
   assert.equal(stored.acf['one-time_payment_value'], 'INR 94,000');
-  // The No-Cost EMI box ("Starting from ₹ ... /month") reads its own field; it gets the bare figure.
-  assert.equal(stored.acf.emi_amount, 'INR 6,917 /-');
+  // The page prints the EMI amount followed by "/month": a bare "₹ 6,917", never "INR 6,917 /- /month".
+  // The No-Cost EMI box ("Starting from ₹ ... /month") reads its own field; it gets just the figure.
+  assert.equal(stored.acf.emi_amount, '₹ 6,917');
   assert.equal(stored.acf.specialization_lowest_emi_strats_from, '6,917');
 
   // What has nowhere to go is reported, not sent.
   const skipped = result.skipped.join(' | ');
-  for (const k of ['hero_image', 'admission_steps_list', 'certificate_heading']) assert.match(skipped, new RegExp(k));
-  assert.doesNotMatch(skipped, /placement_stats/, 'the stats are facts for the AI, not a field WordPress lacks');
+  assert.match(skipped, /hero_image/);
+  // Placement stats and the admission steps list are facts for the AI; specialization pages no
+  // longer have a certificate heading. None of them is "missing" on WordPress.
+  assert.doesNotMatch(skipped, /placement_stats|admission_steps_list|certificate_heading/);
+  // Filled from what the page already has: Best Fee, the At a Glance duration, the syllabus heading.
+  assert.equal(stored.acf.best_price_specialization, undefined, 'Total Fee here is "Test value" - no amount, so no Best Fee');
+  assert.equal(stored.acf.duration_specialization, stored.acf.duration);
+  assert.equal(stored.acf.syllabus_section_heading, stored.acf.syllabus_heading);
   // Hiring partners: the company chips, from their own field.
   assert.equal(stored.acf.hiring_partners_specialization, '<ul><li>IBM</li><li>KPMG</li><li>Larsen &amp; Toubro</li></ul>');
   for (const k of ['highlights', 'exam_details', 'syllabus_subjects', 'admission_steps_list', 'placement_stats', 'certificate_heading', 'hero_image']) {
     assert.ok(!(k in stored.acf), `${k} must not be sent`);
   }
+});
+
+test('course and specialization pages are tagged with their university; the program tag is left to the team', async () => {
+  wp.taxonomies = { institution: [{ id: 45, name: 'Lovely Professional University Online', slug: 'lpu' }], program: [{ id: 42, name: 'MBA', slug: 'mba' }] };
+  // A stray space in the name still finds the existing tag.
+  const r = await publishDraftToWordPress({ pageType: 'specialization', title: 'T', acfFields: { spec_name: 'Online MBA in Finance', university_name: 'Lovely Professional University Online ' } });
+  const post = wp.posts.get(r.id);
+  assert.deepEqual(post.institution, [45]);
+  assert.equal(post.program, undefined, 'set by hand in WordPress, never by a publish');
+  assert.equal(wp.taxonomies.institution.length, 1, 'no duplicate tag');
+  assert.deepEqual(r.skipped, []);
+
+  const amity = await publishDraftToWordPress({ pageType: 'course', title: 'X', acfFields: { program_name: 'Online MCom', university_name: 'Amity University Online' } });
+  assert.equal(wp.taxonomies.institution.at(-1).name, 'Amity University Online', 'a university without a tag gets one');
+  assert.deepEqual(wp.posts.get(amity.id).institution, [wp.taxonomies.institution.at(-1).id]);
+
+  // University pages, and sites without the taxonomy, are left alone.
+  const uni = await publishDraftToWordPress({ pageType: 'university', title: 'LPU', acfFields: { university_name: 'Lovely Professional University Online' } });
+  assert.equal(wp.posts.get(uni.id).institution, undefined);
+  wp.taxonomies = null;
+  __clearWordPressCachesForTests();
+  const plain = await publishDraftToWordPress({ pageType: 'course', title: 'Y', acfFields: { program_name: 'Online MBA', university_name: 'Z' } });
+  assert.equal(wp.posts.get(plain.id).institution, undefined);
+  assert.deepEqual(plain.skipped, []);
+});
+
+test('the new optional fields are left out while empty - a re-publish never blanks what was typed into WordPress', () => {
+  const sent = mapToWordPress({ program_name: 'Online MBA', nirf_rank_course: '', scholarship_facility: ' ', certificate_validity: '', syllabus_section_paragraph: '', duration: '' }, 'course').fields;
+  for (const k of ['nirf_rank_course', 'scholarship_facility', 'certificate_validity', 'course_syllabus_description']) assert.ok(!(k in sent), k);
+  assert.equal(sent.duration, '', 'long-standing fields still send what the draft holds');
+  assert.ok(!('specialization_hero_description' in mapToWordPress({ specialization_hero_description: '' }, 'specialization').fields));
 });
 
 test('an unknown Linked University is left out with a note - never sent blank over a link set in WordPress', async () => {
@@ -217,7 +266,8 @@ test("course and university fields map onto the site's own (and pass its field r
   assert.deepEqual(c.fields.specialization, [{ specialization_name: 'Data Science', specialization_details: 'INR 24,750/- per semester' }, { specialization_name: 'Cloud', specialization_details: '' }]);
   assert.equal(c.fields.num_specializations, '8', 'the number the intern typed, not the length of the list');
   assert.equal(c.fields.specializations_intro, 'Choose from several specializations.\nEach has its own fee.');
-  assert.match(c.skipped.join(' | '), /admission_steps_list \(no such field in WordPress yet\)/);
+  assert.deepEqual(c.skipped, []);
+  assert.ok(!('admission_steps_list' in c.fields), 'facts for the AI, never published');
   for (const [k, v] of Object.entries(c.fields)) assert.equal(wpInvalid(v, SCHEMAS.course.properties[k], k), null);
 
   const uni = mapToWordPress({
@@ -235,7 +285,7 @@ test("course and university fields map onto the site's own (and pass its field r
   // placement_highlights is the page's "Top Hiring Partners" chips: company names, never the stats.
   assert.equal(u.fields.placement_highlights, '<ul><li>Amazon</li><li>Deloitte</li></ul>');
   assert.ok(!u.skipped.some(s => /placement_stats/.test(s)));
-  assert.equal(u.fields.partner_banks_names, 'HDFC, ICICI');
+  assert.equal(u.fields.partner_banks_names, '<ul><li>HDFC</li><li>ICICI</li></ul>', 'bank chips, like the hiring partners');
   assert.deepEqual(u.fields.faculty_members, [{ member_name: 'Dr. A', member_designation: 'Professor, MBA, PhD' }]);
   assert.ok(!('about_additional_notes' in u.fields) && !u.skipped.some(s => /additional_notes/.test(s)), 'AI-only notes are never published, and not reported as missing');
   for (const [k, v] of Object.entries(u.fields)) assert.equal(wpInvalid(v, SCHEMAS.university.properties[k], k), null);
@@ -257,7 +307,9 @@ test('hand-written section paragraphs reach the fields the site has, under whate
   assert.equal(staging.fields.accreditation_paragraph, 'Approved by UGC-DEB and AICTE.');
   assert.equal(staging.fields.fee_structure_paragraph, 'Pay per semester or yearly.');
   assert.equal(staging.fields['job_roles_&_salary_paragraph'], 'Roles pay INR 6-12 LPA.');
-  assert.deepEqual(staging.skipped, ['syllabus_section_paragraph (no such field in WordPress yet)'], 'the empty eligibility paragraph is not reported');
+  // Course pages keep the paragraph above the syllabus in course_syllabus_description.
+  assert.equal(staging.fields.course_syllabus_description, 'Four semesters of core and elective subjects.');
+  assert.deepEqual(staging.skipped, [], 'the empty eligibility paragraph is not reported');
 
   // A site with the older names: validity, and the "&" dropped from the job roles field.
   const props = { ...SCHEMAS.course.properties, validity: { type: ['string', 'null'] }, job_roles_salary_paragraph: { type: ['string', 'null'] } };
@@ -272,6 +324,56 @@ test('hand-written section paragraphs reach the fields the site has, under whate
   for (const k of ['fee_section_paragraph', 'other_specializations_section_paragraph', 'syllabus_section_paragraph', 'eligibility_criteria_paragraph']) assert.ok(spec.fields[k], k);
   assert.equal(spec.fields.job_profiles_section_paragraph, '');
   assert.deepEqual(spec.skipped, []);
+});
+
+test('values the page shows as stats: filled from what the page has, cleaned of placeholders', () => {
+  const course = mapToWordPress({
+    program_name: 'Online MBA', total_fee: 'INR 1,25,000 /-', duration: '2 Years', syllabus_heading: 'Online MBA Syllabus',
+    emi_amount: 'INR 3,743 /-', num_specializations: '0 (Not Offered)', validity: 'Validity is not mentioned', naac_grade: 'N/A',
+    nirf_rank_course: '#69', partner_banks: 'HDFC Bank, Propelld', scholarship_facility: '25% early bird discount.', certificate_validity: 'Lifetime',
+    specialization: [{ specialization_name: 'Finance', specialization_details: 'INR 88,500 /-' }, { specialization_name: 'HR', specialization_details: 'INR 1,10,000 /-' }]
+  }, 'course');
+  const c = conformToSchema(course.fields, SCHEMAS.course);
+  assert.deepEqual(c.skipped, []);
+  assert.equal(c.fields.best_price_value, 'INR 1,25,000 /-');
+  assert.equal(c.fields.program_duration, '2 Years');
+  assert.equal(c.fields.course_syllabus_section_heading, 'Online MBA Syllabus');
+  assert.equal(c.fields.course_amount_range, 'INR 88,500 /- – INR 1,10,000 /-');
+  assert.equal(c.fields.emi_amount, '₹ 3,743');
+  for (const k of ['num_specializations', 'program_validity', 'naac_grade']) assert.equal(c.fields[k], '', `${k}: a placeholder prints as written, so it goes empty`);
+  assert.equal(c.fields.nirf_rank_course, '#69');
+  assert.equal(c.fields.partner_banks_course, '<ul><li>HDFC Bank</li><li>Propelld</li></ul>');
+  assert.equal(c.fields.scholarship_facility, '25% early bird discount.');
+  assert.equal(c.fields.certificate_validity, 'Lifetime');
+
+  // Nothing to fill from: nothing sent, so a value typed into WordPress stays.
+  const bare = mapToWordPress({ program_name: 'Online MBA', total_fee: 'On request', specialization: [{ specialization_name: 'Finance', specialization_details: 'INR 88,500' }] }, 'course').fields;
+  for (const k of ['best_price_value', 'program_duration', 'course_amount_range', 'course_syllabus_section_heading', 'partner_banks_course']) assert.ok(!(k in bare), k);
+
+  const spec = conformToSchema(mapToWordPress({ spec_name: 'Online MBA in Finance', validity: '4 Years', partner_banks: 'Propelld', specialization_hero_description: 'Build a career in finance.' }, 'specialization').fields, SCHEMAS.specialization);
+  assert.deepEqual(spec.skipped, []);
+  assert.equal(spec.fields.program_validity, '4 Years');
+  assert.equal(spec.fields.partner_banks_specialization, '<ul><li>Propelld</li></ul>');
+  assert.equal(spec.fields.specialization_hero_description, 'Build a career in finance.');
+
+  const uni = conformToSchema(mapToWordPress({ university_name: 'VGU Online', nirf_rank: '#95', emi_interest_rate_value: '0%' }, 'university').fields, SCHEMAS.university);
+  assert.deepEqual([uni.fields.nirf_rank, uni.fields.emi_interest_rate_value, uni.skipped], ['#95', '0%', []]);
+});
+
+test('page titles lead with the university when the name is just the program', () => {
+  const lpu = 'Lovely Professional University Online';
+  assert.equal(pageTitle('course', { program_name: 'Online BA', university_name: lpu }), 'Lovely Professional University Online BA');
+  assert.equal(pageTitle('specialization', { spec_name: 'Online BA in English', university_name: lpu }), 'Lovely Professional University Online BA in English');
+  assert.equal(pageTitle('course', { program_name: 'MBA', university_name: 'NMIMS' }), 'NMIMS MBA');
+  assert.equal(pageTitle('course', { program_name: 'LPU Online MCA in Data Science', university_name: 'LPU Online' }), 'LPU Online MCA in Data Science', 'already names it');
+  assert.equal(pageTitle('course', { program_name: 'Sharda Online MBA', university_name: 'Sharda University Online' }), 'Sharda Online MBA', 'not a bare program name');
+  assert.equal(pageTitle('university', { university_name: 'VGU Online' }), 'VGU Online');
+  assert.equal(pageTitle('course', { university_name: lpu }), 'Untitled');
+  // A specialization still finds its course page under either title.
+  assert.equal(pickLinkedPost([{ id: 7, title: { rendered: 'Lovely Professional University Online BA' } }], ['Online BA', pageTitle('course', { program_name: 'Online BA', university_name: lpu })]), 7);
+  for (const [name, degree] of [['Online BA in English', 'BA'], ['Online M.Com', 'MCom'], ['Online MBA in HR', 'MBA'], ['Online BA in Mass Communication', 'BA'], ['Executive Program', null]]) {
+    assert.equal(degreeOf(name), degree, name);
+  }
 });
 
 test('Top Hiring Partners: typed any common way, sent as chips to each page type\'s own field - never blank', () => {
@@ -447,7 +549,7 @@ test('Publish to WordPress (route): what had no place is shown; a half-made page
     assert.equal(ok.status, 200, JSON.stringify(ok.body));
     assert.equal(ok.body.draft.wordpress_post_id, 900, 'the retry filled the same page');
     assert.equal(wp.posts.size, 1, 'no duplicate page');
-    assert.match(ok.body.skipped.join(' | '), /admission_steps_list/);
+    assert.doesNotMatch(ok.body.skipped.join(' | '), /admission_steps_list/);
   } finally {
     await t.close();
   }

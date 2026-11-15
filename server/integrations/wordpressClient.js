@@ -1,7 +1,7 @@
 import http from 'node:http';
 import https from 'node:https';
 import { config, assertWordpressConfigured } from '../config.js';
-import { mapToWordPress, conformToSchema, pickLinkedPost, LINKED_FIELDS } from './wordpressAcf.js';
+import { mapToWordPress, conformToSchema, pickLinkedPost, pageTitle, LINKED_FIELDS } from './wordpressAcf.js';
 
 // The only file that talks to WordPress directly. Authenticates with an Application Password
 // (WP Admin > Users > profile > Application Passwords) via HTTP Basic auth — this is WordPress's
@@ -170,13 +170,16 @@ async function wpRequest(method, path, { json, slug } = {}) {
 const SCHEMA_TTL_MS = 10 * 60 * 1000;
 const schemaCache = new Map();
 
-async function getAcfSchema(slug) {
+async function postTypeSchema(slug) {
   const cached = schemaCache.get(slug);
-  if (cached && Date.now() - cached.at < SCHEMA_TTL_MS) return cached.schema;
+  if (cached && Date.now() - cached.at < SCHEMA_TTL_MS) return cached;
   const body = await wpRequest('OPTIONS', slug, { slug });
-  const schema = body?.schema?.properties?.acf || null;
-  schemaCache.set(slug, { schema, at: Date.now() });
-  return schema;
+  const entry = { schema: body?.schema?.properties?.acf || null, topLevel: Object.keys(body?.schema?.properties || {}), at: Date.now() };
+  schemaCache.set(slug, entry);
+  return entry;
+}
+async function getAcfSchema(slug) {
+  return (await postTypeSchema(slug)).schema;
 }
 
 // The site's ACF fields for a page type ({ name: JSON schema }), for the "→ WordPress" tags and the
@@ -215,7 +218,7 @@ async function getPostStatus(slug, postId) {
 // Linked University / Linked Course: the name chosen in Content Studio -> the ID of that page on the
 // site. Not found (not published to WordPress yet) or ambiguous -> left out, with a note; never
 // sent as a blank, which would wipe a link set by hand in WordPress.
-async function findLinkedPostIds(pageType, linkedNames) {
+async function findLinkedPostIds(pageType, linkedNames, universityName) {
   const ids = {};
   const notes = [];
   // Resolve the university first: it narrows a course name shared by several universities.
@@ -226,7 +229,9 @@ async function findLinkedPostIds(pageType, linkedNames) {
     const slug = postTypeSlug(targetType);
     try {
       const posts = await wpRequest('GET', `${slug}?search=${encodeURIComponent(name)}&per_page=20&status=publish&_fields=id,title,acf`, { slug });
-      const id = pickLinkedPost(posts, name, ids.linked_university);
+      // A course page's title may lead with its university ("LPU Online BA" for "Online BA").
+      const names = targetType === 'course' ? [name, pageTitle('course', { program_name: name, university_name: universityName })] : name;
+      const id = pickLinkedPost(posts, names, ids.linked_university);
       if (id) ids[key] = id;
       else notes.push(`${key} ("${name}" isn't a ${targetType} page on WordPress yet - publish it first, or link it in WordPress)`);
     } catch (e) {
@@ -234,6 +239,44 @@ async function findLinkedPostIds(pageType, linkedNames) {
     }
   }
   return { ids, notes };
+}
+
+// Course and specialization pages are tagged with their university (the "institution" taxonomy) - the
+// site's listings use it. A university the site has no tag for yet gets one (as the Micro Parser
+// did); a site without the taxonomy is left alone. The "program" taxonomy is NOT set: the content
+// team sets it (with the category page) by hand in WordPress, so a re-publish never touches it.
+// degreeOf is kept for the field audit and tests.
+const DEGREES = ['MBA', 'MCA', 'BBA', 'BCA', 'MCom', 'BCom', 'MSc', 'BSc', 'MA', 'BA', 'PGDM', 'DBA', 'PhD', 'MTech', 'BTech'];
+const degreeRe = (d) => new RegExp(`\\b${d.split('').join('\\.?\\s?')}\\b`, 'i');
+export function degreeOf(...texts) {
+  const text = texts.filter(Boolean).join(' ');
+  return DEGREES.find(d => degreeRe(d).test(text)) || null;
+}
+const termKey = (s) => String(s || '').toLowerCase().replace(/&amp;|&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+online$/, '').trim();
+
+async function ensureTerm(taxonomy, name) {
+  const terms = await wpRequest('GET', `${taxonomy}?search=${encodeURIComponent(name.trim().replace(/\s+online$/i, ''))}&per_page=100&_fields=id,name,slug`, { slug: taxonomy });
+  const found = (terms || []).find(t => termKey(t.name) === termKey(name) || termKey(t.slug) === termKey(name));
+  if (found) return found.id;
+  return (await wpRequest('POST', taxonomy, { slug: taxonomy, json: { name } })).id;
+}
+
+// `available`: the post type's own top-level fields (from its schema) - a taxonomy the site doesn't
+// attach to this page type isn't there, and isn't touched.
+async function pageTerms(pageType, acfFields, available) {
+  if (!['course', 'specialization'].includes(pageType)) return { terms: {}, notes: [] };
+  const wanted = { institution: String(acfFields.university_name || '').replace(/\s+/g, ' ').trim() || null };
+  const terms = {};
+  const notes = [];
+  for (const [taxonomy, name] of Object.entries(wanted)) {
+    if (!name || !available.includes(taxonomy)) continue;
+    try {
+      terms[taxonomy] = [await ensureTerm(taxonomy, name)];
+    } catch (e) {
+      notes.push(`${taxonomy} tag "${name}" (couldn't set it: ${e.message})`);
+    }
+  }
+  return { terms, notes };
 }
 
 // Publishes one approved draft. `acfFields` is the draft's export (transformToACF, plus generated
@@ -252,19 +295,22 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
 
   const mapped = mapToWordPress(acfFields, pageType);
   let schema = null;
+  let topLevel = [];
   const skipped = [...mapped.skipped];
   try {
-    schema = await getAcfSchema(slug);
+    ({ schema, topLevel } = await postTypeSchema(slug));
   } catch (e) {
     console.warn(`[wordpress] couldn't read the ${slug} field list (${e.message}); publishing without the schema check`);
   }
   const conformed = conformToSchema(mapped.fields, schema);
   skipped.push(...conformed.skipped);
-  const linked = await findLinkedPostIds(pageType, mapped.linkedNames);
+  const linked = await findLinkedPostIds(pageType, mapped.linkedNames, acfFields.university_name);
   skipped.push(...linked.notes);
   const acf = { ...conformed.fields, ...linked.ids };
+  const tags = await pageTerms(pageType, acfFields, topLevel);
+  skipped.push(...tags.notes);
 
-  const fill = (postId) => wpRequest('PUT', `${slug}/${postId}`, { slug, json: { title, status: 'publish', acf } });
+  const fill = (postId) => wpRequest('PUT', `${slug}/${postId}`, { slug, json: { title, status: 'publish', acf, ...tags.terms } });
 
   // Re-publishing: update the page published last time, unless it has since been deleted in
   // WordPress or moved to its Trash. A trashed page is left there rather than updated: WordPress

@@ -75,6 +75,7 @@ export const schemas = {
           { key: 'hero_description', type: 'TEXTAREA', label: 'Hero Short Description', placeholder: 'A short description of the university', required: true, rows: 3, aiAssist: { instructions: 'Write a 1-2 sentence hook that names the university and its flagship credential or mode of study. This is the first text a prospective student reads.' } },
           { key: 'established_year', type: 'TEXT_INPUT', label: 'Established Year', placeholder: 'e.g. 1981' },
           { key: 'naac_grade', type: 'TEXT_INPUT', label: 'NAAC Grade', placeholder: 'e.g. NAAC A++' },
+          { key: 'nirf_rank', type: 'TEXT_INPUT', label: 'NIRF Rank', placeholder: 'e.g. #45 (leave empty if not stated)' },
           { key: 'ugc_approved', type: 'TEXT_INPUT', label: 'UGC Approved', placeholder: 'e.g. UGC-DEB Approved' },
           { key: 'mode_of_learning', type: 'TEXT_INPUT', label: 'Mode of Learning', placeholder: 'e.g. 100% Online' },
           { key: 'starting_fee', type: 'TEXT_INPUT', label: 'Starting Fee', placeholder: 'e.g. ₹55,000' },
@@ -158,6 +159,7 @@ export const schemas = {
         fields: [
           { key: 'emi_heading', type: 'TEXT_INPUT', label: 'EMI Section Heading', placeholder: 'e.g. EMI Options' },
           { key: 'emi_partners', type: 'REPEATER', label: 'EMI Partners', subfields: EMI_PARTNERS_SUBFIELDS },
+          { key: 'emi_interest_rate_value', type: 'TEXT_INPUT', label: 'EMI Interest Rate', placeholder: 'e.g. 0% for no-cost EMI, or 12% p.a.' },
           { key: 'emi_additional_notes', type: 'TEXTAREA', label: 'Additional Notes', placeholder: 'Any extra EMI facts not captured above - the AI will use these when writing EMI Content', rows: 3 },
           { key: 'emi_content', type: 'RICH_TEXT', label: 'EMI Content', placeholder: 'Describe EMI plans and partner banks', aiAssist: { instructions: 'Explain the EMI options and partner banks available for fee payment, in plain reassuring terms, grounded only in the facts provided.' } }
         ]
@@ -245,6 +247,7 @@ export const schemas = {
           { key: 'duration', type: 'TEXT_INPUT', label: 'Duration', placeholder: 'e.g. 2 Years' },
           { key: 'mode', type: 'TEXT_INPUT', label: 'Mode', placeholder: 'e.g. Online' },
           { key: 'naac_grade', type: 'TEXT_INPUT', label: 'NAAC Grade', placeholder: 'e.g. NAAC A++' },
+          { key: 'nirf_rank_course', type: 'TEXT_INPUT', label: 'NIRF Rank', placeholder: 'e.g. #45 (leave empty if not stated)' },
           { key: 'ugc_status', type: 'TEXT_INPUT', label: 'UGC Status', placeholder: 'e.g. UGC-DEB Approved' },
           { key: 'total_fee', type: 'TEXT_INPUT', label: 'Total Fee', placeholder: 'e.g. ₹1.5L' },
           { key: 'starting_fee', type: 'TEXT_INPUT', label: 'Starting Fee', placeholder: 'e.g. ₹35,000' },
@@ -312,10 +315,11 @@ export const schemas = {
             { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
           ] },
           { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month' },
-          // Published as both validity (the course page's field today) and program_validity (being added
-          // on WordPress) - see wordpressAcf.js.
+          { key: 'partner_banks', type: 'TEXTAREA', label: 'Partner Banks', rows: 2, placeholder: 'Banks / lenders for EMI or loans, separated by commas or one per line - e.g. HDFC Bank, Propelld' },
+          // Published to program_validity (an older site's validity) - see wordpressAcf.js.
           { key: 'validity', type: 'TEXT_INPUT', label: 'Program Validity', placeholder: 'e.g. 4 Years' },
-          { key: 'fee_structure_paragraph', type: 'TEXTAREA', label: 'Fee Structure Paragraph', rows: 3, placeholder: 'A short paragraph shown in the fee section' }
+          { key: 'fee_structure_paragraph', type: 'TEXTAREA', label: 'Fee Structure Paragraph', rows: 3, placeholder: 'A short paragraph shown in the fee section' },
+          { key: 'scholarship_facility', type: 'TEXTAREA', label: 'Scholarship', rows: 3, placeholder: 'Scholarships or fee relief, e.g. merit-based or for defence personnel (leave empty if none)' },
         ]
       },
       {
@@ -379,6 +383,7 @@ export const schemas = {
         title: 'Certificate',
         icon: 'FileText',
         fields: [
+          { key: 'certificate_validity', type: 'TEXT_INPUT', label: 'Certificate Validity', placeholder: 'e.g. Lifetime (leave empty if not stated)' },
           { key: 'certificate_description', type: 'TEXTAREA', label: 'Certificate Description', placeholder: 'Post-completion, enrolled students...', rows: 3, aiAssist: { instructions: 'Describe the certificate/credential awarded on completion, grounded only in the facts provided.' } }
         ]
       },
@@ -424,6 +429,7 @@ export const schemas = {
           { key: 'university_name', type: 'TEXT_INPUT', label: 'University Name', placeholder: 'e.g. NMIMS', required: true },
           { key: 'linked_university', type: 'SEARCHABLE_SELECT', directoryPageType: 'university', label: 'Linked University', placeholder: 'Search approved universities…' },
           { key: 'linked_course', type: 'SEARCHABLE_SELECT', directoryPageType: 'course', scopedByFieldKey: 'linked_university', label: 'Linked Course', placeholder: 'Search approved courses…' },
+          { key: 'specialization_hero_description', type: 'TEXTAREA', label: 'Hero Short Description', placeholder: 'A short description of the specialization', rows: 3, aiAssist: { instructions: 'Write a 1-2 sentence hook naming the specialization and the university, and what this specialization prepares a student for. This is the first text a prospective student reads.' } },
           { key: 'duration', type: 'TEXT_INPUT', label: 'Duration', placeholder: 'e.g. 2 Years' },
           { key: 'mode', type: 'TEXT_INPUT', label: 'Mode', placeholder: 'e.g. Online' },
           { key: 'naac_grade', type: 'TEXT_INPUT', label: 'NAAC Grade', placeholder: 'e.g. NAAC A++' },
@@ -472,6 +478,8 @@ export const schemas = {
             { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
           ] },
           { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month', required: true },
+          { key: 'validity', type: 'TEXT_INPUT', label: 'Program Validity', placeholder: 'e.g. 4 Years' },
+          { key: 'partner_banks', type: 'TEXTAREA', label: 'Partner Banks', rows: 2, placeholder: 'Banks / lenders for EMI or loans, separated by commas or one per line - e.g. HDFC Bank, Propelld' },
           { key: 'fee_section_paragraph', type: 'TEXTAREA', label: 'Fee Section Paragraph', rows: 3, placeholder: 'A short paragraph shown in the fee section' }
         ]
       },
@@ -598,6 +606,10 @@ const OPTIONAL_FIELD_KEYS = new Set([
   'about_additional_notes', 'why_choose_additional_notes', 'emi_additional_notes', 'placement_additional_notes',
   // Shown as company chips on the page when filled; many programs don't name any.
   'hiring_partners',
+  // Values and extras WordPress shows only when the document gives them.
+  'nirf_rank', 'nirf_rank_course', 'emi_interest_rate_value', 'partner_banks', 'scholarship_facility', 'certificate_validity',
+  // Specialization hero: AI-written, but drafts made before it existed don't have it.
+  'specialization_hero_description',
   // Section paragraphs and a few extras the WordPress course/specialization pages show, typed in by
   // hand when there's something to say - never required, never AI-written.
   'fee_heading', 'validity', 'accreditation_paragraph', 'eligibility_criteria_paragraph', 'fee_structure_paragraph',

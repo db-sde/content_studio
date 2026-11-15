@@ -14,6 +14,7 @@ import { canEditFieldServer } from '../utils/serverPermissions.js';
 import { validateFactsOnly, validateState, transformToACF } from '../../src/config/schemas.js';
 import { createNotification, listDraftRemarks } from '../repositories/notificationsRepo.js';
 import { publishDraftToWordPress } from '../integrations/wordpressClient.js';
+import { pageTitle } from '../integrations/wordpressAcf.js';
 import { generateImages, getGenerationStatus, getImageHistory, regenerateImage, getCurrentPrompt, patchPrompt, deleteImage } from '../integrations/imagePipelineClient.js';
 import { upsertDirectoryEntry } from '../repositories/directoryRepo.js';
 import { getEffectiveSchemas, getPublishSchemas } from '../repositories/fieldSettingsRepo.js';
@@ -548,8 +549,8 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
     const err = new Error('Only an approved draft can be published to WordPress'); err.status = 409; throw err;
   }
 
-  const titleField = TITLE_FIELD_BY_PAGE_TYPE[draft.page_type];
-  const title = (titleField && draft.form_data[titleField]) || 'Untitled';
+  // "Lovely Professional University Online BA", not just "Online BA" (see pageTitle).
+  const title = pageTitle(draft.page_type, draft.form_data);
   // Built-in fields plus the ones an Admin added (an added field only when it has something in it).
   const acfFields = transformToACF(draft.form_data, draft.page_type, (await getPublishSchemas())[draft.page_type]);
 
