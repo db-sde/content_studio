@@ -12,7 +12,7 @@ import https from 'node:https';
 import express from 'express';
 import { config } from '../server/config.js';
 import { publishDraftToWordPress, __clearWordPressCachesForTests, __setChallengeRetryDelayForTests, degreeOf } from '../server/integrations/wordpressClient.js';
-import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure, partnersToHtmlList, pageTitle } from '../server/integrations/wordpressAcf.js';
+import { mapToWordPress, conformToSchema, htmlToRows, syllabusToYears, pickLinkedPost, emiFigure, partnersToHtmlList, pageTitle, yearsOf } from '../server/integrations/wordpressAcf.js';
 import { transformToACF } from '../src/config/schemas.js';
 import { startTestApp, completeSpecializationFormData } from './helpers/testApp.js';
 
@@ -181,9 +181,8 @@ test("a fully filled specialization passes the site's own field rules: created a
   assert.deepEqual(stored.acf.fee_plans, [{ plan_name: 'Semester Plan', plan_amount: 'INR 24,750' }, { plan_name: 'One-time payment', plan_amount: 'INR 94,000' }]);
   assert.equal(stored.acf.semester_plan_value, 'INR 24,750');
   assert.equal(stored.acf['one-time_payment_value'], 'INR 94,000');
-  // The page prints the EMI amount followed by "/month": a bare "₹ 6,917", never "INR 6,917 /- /month".
-  // The No-Cost EMI box ("Starting from ₹ ... /month") reads its own field; it gets just the figure.
-  assert.equal(stored.acf.emi_amount, '₹ 6,917');
+  // The theme prints "₹ <EMI> /month" itself, so the amount goes bare - never "₹ INR 6,917 /- /month".
+  assert.equal(stored.acf.emi_amount, '6,917');
   assert.equal(stored.acf.specialization_lowest_emi_strats_from, '6,917');
 
   // What has nowhere to go is reported, not sent.
@@ -194,7 +193,7 @@ test("a fully filled specialization passes the site's own field rules: created a
   assert.doesNotMatch(skipped, /placement_stats|admission_steps_list|certificate_heading/);
   // Filled from what the page already has: Best Fee, the At a Glance duration, the syllabus heading.
   assert.equal(stored.acf.best_price_specialization, undefined, 'Total Fee here is "Test value" - no amount, so no Best Fee');
-  assert.equal(stored.acf.duration_specialization, stored.acf.duration);
+  assert.equal(stored.acf.duration_specialization, undefined, 'Duration here is "Test value" - no number, so no figure');
   assert.equal(stored.acf.syllabus_section_heading, stored.acf.syllabus_heading);
   // Hiring partners: the company chips, from their own field.
   assert.equal(stored.acf.hiring_partners_specialization, '<ul><li>IBM</li><li>KPMG</li><li>Larsen &amp; Toubro</li></ul>');
@@ -336,10 +335,10 @@ test('values the page shows as stats: filled from what the page has, cleaned of 
   const c = conformToSchema(course.fields, SCHEMAS.course);
   assert.deepEqual(c.skipped, []);
   assert.equal(c.fields.best_price_value, 'INR 1,25,000 /-');
-  assert.equal(c.fields.program_duration, '2 Years');
+  assert.equal(c.fields.program_duration, '2', 'the theme adds "Yrs" itself');
   assert.equal(c.fields.course_syllabus_section_heading, 'Online MBA Syllabus');
   assert.equal(c.fields.course_amount_range, 'INR 88,500 /- – INR 1,10,000 /-');
-  assert.equal(c.fields.emi_amount, '₹ 3,743');
+  assert.equal(c.fields.emi_amount, '3,743', 'the theme adds "₹" and "/month" itself');
   for (const k of ['num_specializations', 'program_validity', 'naac_grade']) assert.equal(c.fields[k], '', `${k}: a placeholder prints as written, so it goes empty`);
   assert.equal(c.fields.nirf_rank_course, '#69');
   assert.equal(c.fields.partner_banks_course, '<ul><li>HDFC Bank</li><li>Propelld</li></ul>');
@@ -358,6 +357,15 @@ test('values the page shows as stats: filled from what the page has, cleaned of 
 
   const uni = conformToSchema(mapToWordPress({ university_name: 'VGU Online', nirf_rank: '#95', emi_interest_rate_value: '0%' }, 'university').fields, SCHEMAS.university);
   assert.deepEqual([uni.fields.nirf_rank, uni.fields.emi_interest_rate_value, uni.skipped], ['#95', '0%', []]);
+});
+
+test('what the theme adds by itself is taken off before sending', () => {
+  const c = mapToWordPress({ program_name: 'Online MBA', emi_amount: '₹8,750/month', duration: '18 Months', num_specializations: '12+' }, 'course').fields;
+  assert.deepEqual([c.emi_amount, c.program_duration, c.num_specializations, c.duration], ['8,750', '1.5', '12', '18 Months'], 'Duration itself is shown as typed elsewhere');
+  const s = mapToWordPress({ spec_name: 'x', emi_amount: 'INR 7,078 /-', duration: '2-3 Years' }, 'specialization').fields;
+  assert.deepEqual([s.emi_amount, s.specialization_lowest_emi_strats_from, s.duration_specialization], ['7,078', '7,078', '2-3']);
+  assert.equal(mapToWordPress({ established_year: 'Est. 1998' }, 'university').fields.established_year, '1998');
+  for (const [typed, years] of [['2 Years', '2'], ['3 Year', '3'], ['24 months', '2'], ['1.5 years', '1.5']]) assert.equal(yearsOf(typed), years, typed);
 });
 
 test('page titles lead with the university when the name is just the program', () => {

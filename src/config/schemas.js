@@ -314,7 +314,7 @@ export const schemas = {
             { key: 'plan_amount', label: 'Plan Amount', type: 'text', placeholder: 'e.g. ₹35,000' },
             { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
           ] },
-          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month' },
+          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. 8,750 (the page adds ₹ and /month)' },
           { key: 'partner_banks', type: 'TEXTAREA', label: 'Partner Banks', rows: 2, placeholder: 'Banks / lenders for EMI or loans, separated by commas or one per line - e.g. HDFC Bank, Propelld' },
           // Published to program_validity (an older site's validity) - see wordpressAcf.js.
           { key: 'validity', type: 'TEXT_INPUT', label: 'Program Validity', placeholder: 'e.g. 4 Years' },
@@ -477,7 +477,7 @@ export const schemas = {
             { key: 'plan_amount', label: 'Plan Amount', type: 'text', placeholder: 'e.g. ₹35,000' },
             { key: 'plan_total', label: 'Plan Total', type: 'text', placeholder: 'e.g. ₹1,40,000' }
           ] },
-          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. ₹8,750/month', required: true },
+          { key: 'emi_amount', type: 'TEXT_INPUT', label: 'EMI Amount', placeholder: 'e.g. 8,750 (the page adds ₹ and /month)', required: true },
           { key: 'validity', type: 'TEXT_INPUT', label: 'Program Validity', placeholder: 'e.g. 4 Years' },
           { key: 'partner_banks', type: 'TEXTAREA', label: 'Partner Banks', rows: 2, placeholder: 'Banks / lenders for EMI or loans, separated by commas or one per line - e.g. HDFC Bank, Propelld' },
           { key: 'fee_section_paragraph', type: 'TEXTAREA', label: 'Fee Section Paragraph', rows: 3, placeholder: 'A short paragraph shown in the fee section' }

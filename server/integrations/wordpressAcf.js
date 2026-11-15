@@ -154,11 +154,22 @@ const eligibilityRows = (rows) => ({ eligibility_content: htmlToRows(rows, 'elig
 // "INR 6,917 /-" -> "6,917" (the first amount in the text; '' if there is none).
 export const emiFigure = (value) => (/\d[\d,]*(?:\.\d+)?/.exec(htmlToText(value)) || [''])[0].replace(/,$/, '');
 
-// The page prints the EMI amount followed by "/month", so it must be a bare amount: "INR 6,917 /-" or
-// "₹7,078/month" -> "₹ 6,917" (as the WordPress team enters it). '' when there's no amount.
-export const emiDisplay = (value) => {
-  const figure = emiFigure(value);
-  return figure ? `₹ ${figure}` : '';
+// What the theme adds around a value by itself is never sent with it: if someone typed it, it's taken
+// off. The theme prints "₹ <EMI> /month", "<duration> Yrs", "<count> + Specializations" and
+// "Est. <year>", so those go bare: "INR 6,917 /-" -> "6,917", "2 Years" -> "2", "12+" -> "12", "Est. 1998" -> "1998".
+export function yearsOf(value) {
+  const text = htmlToText(value).toLowerCase();
+  const nums = [...text.matchAll(/\d+(?:\.\d+)?/g)].map(m => m[0]);
+  if (!nums.length) return '';
+  const months = /month/.test(text) && !/year|yr/.test(text);
+  const fmt = (n) => (months ? String(Number((Number(n) / 12).toFixed(1))) : n);
+  return nums.length > 1 && /\d\s*(-|–|to)\s*\d/.test(text) ? `${fmt(nums[0])}-${fmt(nums[1])}` : fmt(nums[0]);
+}
+const countOf = (value) => (/\d+/.exec(htmlToText(value)) || [''])[0];
+const yearOf = (value) => (/\b(1[89]\d\d|20\d\d)\b/.exec(htmlToText(value)) || [''])[0];
+const THEME_ADDS = {
+  emi_amount: emiFigure, program_duration: yearsOf, duration_specialization: yearsOf,
+  num_specializations: countOf, established_year: yearOf
 };
 
 // Partner banks / lenders, typed like hiring partners: chips in that page type's own field.
@@ -189,7 +200,7 @@ const FIELD_MAPS = {
     validity: (value) => ({ program_validity: value }),
     hiring_partners: hiringPartners('course'),
     partner_banks: partnerBanks('course'),
-    emi_amount: (value) => ({ emi_amount: emiDisplay(value) }),
+    emi_amount: (value) => ({ emi_amount: emiFigure(value) }),
     // On course pages the paragraph above the syllabus is course_syllabus_description.
     syllabus_section_paragraph: rename('course_syllabus_description'),
     // course has a highlights repeater of its own AND a single-block copy for the summary display.
@@ -201,7 +212,7 @@ const FIELD_MAPS = {
     // The page shows EMI twice: "EMI From <emi_amount>" at the top, and a No-Cost EMI box reading
     // "Starting from ₹ <specialization_lowest_emi_strats_from> /month" - which stayed blank because
     // nothing filled that field. Same figure; the box adds the ₹ and /month itself, so just the number.
-    emi_amount: (value) => ({ emi_amount: emiDisplay(value), specialization_lowest_emi_strats_from: emiFigure(value) }),
+    emi_amount: (value) => ({ emi_amount: emiFigure(value), specialization_lowest_emi_strats_from: emiFigure(value) }),
     hiring_partners: hiringPartners('specialization'),
     partner_banks: partnerBanks('specialization'),
     validity: (value) => ({ program_validity: value }),
@@ -308,7 +319,12 @@ export function mapToWordPress(acf, pageType) {
   // Optional fields added after many pages were already published: left out while empty, so a
   // re-publish never blanks a value someone typed into WordPress directly.
   for (const key of SEND_ONLY_WHEN_FILLED) if (key in fields && isBlank(fields[key])) delete fields[key];
-  for (const [key, value] of Object.entries(fields)) fields[key] = cleanValue(key, value);
+  for (const [key, value] of Object.entries(fields)) {
+    const cleaned = cleanValue(key, value);
+    fields[key] = THEME_ADDS[key] && typeof cleaned === 'string' && cleaned.trim() ? THEME_ADDS[key](cleaned) : cleaned;
+    // A duration with no number in it ("Self-paced") gives no At a Glance figure: leave it out.
+    if ((key === 'program_duration' || key === 'duration_specialization') && !fields[key]) delete fields[key];
+  }
   return { fields, linkedNames, skipped };
 }
 
