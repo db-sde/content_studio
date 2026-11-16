@@ -106,6 +106,15 @@ test('a course arrives in Senior Review, fields translated, with the document an
   assert.match(rows[0].message, /Hiring partner names also appear/);
 });
 
+test('the drafts list says which drafts came from the micro app (its own home tab)', async () => {
+  const list = await t.api(S, 'GET', '/api/drafts');
+  const imported = list.body.drafts.find(d => d.source === 'parser' && d.source_filename === 'Copy of Amity University Online MBA program.docx');
+  assert.ok(imported, 'the imported draft is listed with its source and file name');
+  const { body } = await t.api(S, 'POST', '/api/drafts', { pageType: 'course' });
+  const after = await t.api(S, 'GET', '/api/drafts');
+  assert.equal(after.body.drafts.find(d => d.id === body.draft.id).source, null); // made here
+});
+
 test('sending the same upload again returns the existing draft instead of a copy', async () => {
   const again = await send({ pageType: 'course', uploadId: '481', payload: { ...COURSE_PAYLOAD, total_fee: 'changed' } });
   assert.equal(again.status, 200);

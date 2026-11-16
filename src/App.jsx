@@ -305,7 +305,10 @@ function ContentStudioApp() {
   // Home is now two tabs instead of one cluttered scroll: 'create' (hero + templates) and
   // 'drafts' (the saved-drafts table, with all its status/priority/live badges) — splitting them
   // is what actually fixes the "too much on one page" complaint, not just re-styling the same pile.
-  const [homeTab, setHomeTab] = useState('create');
+  const [homeTab, setHomeTabState] = useState('create');
+  // A bulk selection belongs to the tab it was made in, so bulk actions never reach drafts that
+  // aren't on screen (Drafts vs From Micro App).
+  const setHomeTab = (tab) => { setHomeTabState(tab); setSelectedDraftIds(new Set()); };
   // Fixed at a size that comfortably clears the compact bell+avatar cluster in the top-right
   // corner — that cluster no longer grows with the signed-in user's name/role (it's just an
   // avatar + chevron now), so this no longer needs to be measured live like the old wide pill did.
@@ -318,6 +321,11 @@ function ContentStudioApp() {
   // list (which carries created_by_user_id) rather than adding owner info to the reducer; if the
   // list hasn't caught up with a just-created draft yet, treat it as the creator's own.
   const activeDraftMeta = activeDraftId ? drafts.find(d => d.id === activeDraftId) : null;
+  // Drafts the document parser (micro app) sent in live in their own home tab, "From Micro App";
+  // the Drafts tab lists the ones made here. Each draft shows in one tab only.
+  const parserDrafts = useMemo(() => drafts.filter(d => d.source === 'parser'), [drafts]);
+  const ownDrafts = useMemo(() => drafts.filter(d => d.source !== 'parser'), [drafts]);
+  const parserWaitingCount = parserDrafts.filter(d => d.status === 'senior_review').length;
   const isDraftOwner = currentUser.role !== 'intern' || !activeDraftMeta || ownerIdOf(activeDraftMeta) === currentUser.id;
   const [draftsSearch, setDraftsSearch] = useState('');
   const [expandedSections, setExpandedSections] = useState({});
@@ -477,7 +485,9 @@ function ContentStudioApp() {
       // whichever draft happens to be newest in a list that shows every Intern's work.
       const resumable = currentUser?.role === 'intern'
         ? list.filter(d => ownerIdOf(d) === currentUser.id && d.status === 'intern_editing')
-        : list;
+        : list.filter(d => d.source !== 'parser' || d.last_edited_by_user_id === currentUser?.id);
+      // (A draft just sent from the micro app isn't anyone's "unfinished draft" yet - it has its
+      // own tab and notification - until this senior has worked on it.)
       if (resumable.length > 0 && !activePageTypeRef.current && currentUser?.role !== 'admin') {
         setLatestDraft(resumable[0]);
         setShowBanner(true);
@@ -1218,18 +1228,22 @@ function ContentStudioApp() {
     });
   };
 
-  const clearAllDrafts = async () => {
+  // Deletes the drafts listed in the tab it's clicked in (Drafts, or From Micro App) - not both.
+  const clearAllDrafts = async (list = drafts) => {
+    const ids = new Set(list.map(d => d.id));
     setConfirmModal({
-      title: 'Delete all saved drafts?',
+      title: `Delete all ${list.length} drafts in this tab?`,
       message: 'This action is permanent and cannot be undone.',
       confirmLabel: 'Delete All',
       danger: true,
       onConfirm: async () => {
         try {
-          await Promise.all(drafts.map(d => draftsClient.deleteDraft(d.id)));
-          setDrafts([]);
-          setLatestDraft(null);
-          setShowBanner(false);
+          await Promise.all([...ids].map(id => draftsClient.deleteDraft(id)));
+          setDrafts(prev => prev.filter(d => !ids.has(d.id)));
+          if (latestDraft && ids.has(latestDraft.id)) {
+            setLatestDraft(null);
+            setShowBanner(false);
+          }
         } catch (e) {
           console.error('Error clearing drafts', e);
           toast.error(e.message || 'Failed to delete all drafts');
@@ -1768,8 +1782,25 @@ function ContentStudioApp() {
               >
                 <FolderOpen className="w-3.5 h-3.5" />
                 Drafts
-                {drafts.length > 0 && (
-                  <span className="bg-navy-soft text-navy text-[10px] font-bold px-1.5 py-0.5 rounded-full">{drafts.length}</span>
+                {ownDrafts.length > 0 && (
+                  <span className="bg-navy-soft text-navy text-[10px] font-bold px-1.5 py-0.5 rounded-full">{ownDrafts.length}</span>
+                )}
+              </button>
+              <button
+                type="button"
+                id="home-tab-micro-app"
+                onClick={() => setHomeTab('parser')}
+                className={`flex items-center gap-1.5 h-full px-3 text-xs font-bold uppercase tracking-wide border-b-2 transition-colors ${
+                  homeTab === 'parser' ? 'text-orange border-orange' : 'text-muted border-transparent hover:text-navy'
+                }`}
+              >
+                <FileText className="w-3.5 h-3.5" />
+                From Micro App
+                {parserDrafts.length > 0 && (
+                  <span className="bg-navy-soft text-navy text-[10px] font-bold px-1.5 py-0.5 rounded-full">{parserDrafts.length}</span>
+                )}
+                {parserWaitingCount > 0 && (
+                  <span className="bg-orange text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full" title="Waiting in Senior Review">{parserWaitingCount} new</span>
                 )}
               </button>
             </div>
@@ -1862,6 +1893,8 @@ function ContentStudioApp() {
             <div className="max-w-6xl w-full mx-auto px-6 py-10">
               <div className="bg-white border border-border rounded-2xl p-6 shadow-premium">
                 {(() => {
+                  const isParserTab = homeTab === 'parser';
+                  const tabDrafts = isParserTab ? parserDrafts : ownDrafts;
                   const searchQuery = draftsSearch.trim().toLowerCase();
                   const columns = buildDraftColumns({
                     title: getDraftListTitle, isUntitled: isUntitledDraft, isDuplicate: isDuplicateDraft, isRepeated: isRepeatedDraft,
@@ -1871,11 +1904,11 @@ function ContentStudioApp() {
                   // The Status column's dropdown and the status buttons are one filter; the buttons
                   // also offer "Duplicates", which the Status column doesn't.
                   const columnFilterValues = { ...draftColumnFilters, status: STATUS_COLUMN_KEYS.includes(draftsStatusFilter) ? draftsStatusFilter : ALL };
-                  const searched = drafts.filter(d => draftMatchesSearch(d, searchQuery));
+                  const searched = tabDrafts.filter(d => draftMatchesSearch(d, searchQuery));
                   // Each dropdown counts what passes every OTHER filter (and the search), so its numbers
                   // say what choosing that option would show.
                   const optionsFor = (columnId) => columnOptionsWithChoice(
-                    drafts, searched.filter(d => matchesOtherColumns(d, columns, columnFilterValues, columnId)),
+                    tabDrafts, searched.filter(d => matchesOtherColumns(d, columns, columnFilterValues, columnId)),
                     columns.find(c => c.id === columnId), columnFilterValues[columnId]
                   );
                   const draftsForStatusButtons = searched.filter(d => matchesOtherColumns(d, columns, columnFilterValues, 'status'));
@@ -1892,9 +1925,9 @@ function ContentStudioApp() {
 
                   // Counted over every draft (not the filtered view) so the numbers stay put while
                   // searching: an untitled draft isn't an entry yet, and a repeat isn't a new one.
-                  const untitledCount = drafts.filter(isUntitledDraft).length;
-                  const duplicateCount = drafts.filter(d => !isUntitledDraft(d) && isDuplicateDraft(d)).length;
-                  const uniqueCount = drafts.length - untitledCount - duplicateCount;
+                  const untitledCount = tabDrafts.filter(isUntitledDraft).length;
+                  const duplicateCount = tabDrafts.filter(d => !isUntitledDraft(d) && isDuplicateDraft(d)).length;
+                  const uniqueCount = tabDrafts.length - untitledCount - duplicateCount;
                   const statusSummary = searchQuery
                     ? ALL_DRAFT_STATUSES
                         .map(st => [st, filteredDrafts.filter(d => d.status === st).length])
@@ -1906,8 +1939,8 @@ function ContentStudioApp() {
                 <>
                 <div className="flex justify-between items-center mb-4 border-b border-border pb-4">
                   <h2 className="text-lg font-bold text-navy flex items-center gap-2 uppercase tracking-wide">
-                    <History className="w-5 h-5 text-orange" />
-                    Saved Drafts
+                    {isParserTab ? <FileText className="w-5 h-5 text-orange" /> : <History className="w-5 h-5 text-orange" />}
+                    {isParserTab ? 'From Micro App' : 'Saved Drafts'}
                   </h2>
                   <div className="flex items-center gap-4">
                     {currentUser.role === 'admin' && selectedDraftIds.size > 0 && (
@@ -1936,9 +1969,9 @@ function ContentStudioApp() {
                         </button>
                       </div>
                     )}
-                    {drafts.length > 0 && (
+                    {tabDrafts.length > 0 && (
                       <button
-                        onClick={clearAllDrafts}
+                        onClick={() => clearAllDrafts(tabDrafts)}
                         className="flex items-center gap-1.5 text-xs text-danger font-semibold hover:text-danger-hover transition-colors"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
@@ -1950,7 +1983,7 @@ function ContentStudioApp() {
 
                 {/* Status filter — available to all three roles, so an Intern/Senior/Admin can
                     each narrow the list down to just the stage they care about. */}
-                {drafts.length > 0 && (
+                {tabDrafts.length > 0 && (
                   <>
                     {/* Search by university, specialization/course title, intern, or status - answers
                         "has this one already been done, and where is it now?" without scrolling. */}
@@ -1984,10 +2017,10 @@ function ContentStudioApp() {
                       <span className="text-muted"><span className="font-bold text-navy">{uniqueCount}</span> unique</span>
                       <span className={duplicateCount > 0 ? 'text-danger' : 'text-muted'}><span className="font-bold">{duplicateCount}</span> duplicate{duplicateCount === 1 ? '' : 's'}</span>
                       <span className="text-muted"><span className="font-bold text-navy">{untitledCount}</span> untitled</span>
-                      <span className="text-muted/70">{drafts.length} drafts total</span>
+                      <span className="text-muted/70">{tabDrafts.length} drafts total</span>
                       {anyFilterActive && (
                         <span className="ml-auto flex items-center gap-2">
-                          <span className="font-semibold text-navy">Showing {filteredDrafts.length} of {drafts.length}</span>
+                          <span className="font-semibold text-navy">Showing {filteredDrafts.length} of {tabDrafts.length}</span>
                           <button type="button" onClick={clearAllFilters} className="font-bold text-orange hover:text-orange-hover">
                             Clear filters
                           </button>
@@ -2015,18 +2048,29 @@ function ContentStudioApp() {
                   </>
                 )}
 
-                {drafts.length === 0 ? (
+                {tabDrafts.length === 0 ? (
                   <div className="py-16 text-center">
                     <div className="w-12 h-12 rounded-full bg-navy-soft flex items-center justify-center mx-auto mb-3">
                       <History className="w-5 h-5 text-navy/50" />
                     </div>
-                    <p className="text-sm text-navy font-semibold">No saved drafts yet</p>
-                    <button
-                      onClick={() => setHomeTab('create')}
-                      className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
-                    >
-                      Pick a template to start writing →
-                    </button>
+                    {isParserTab ? (
+                      <>
+                        <p className="text-sm text-navy font-semibold">Nothing sent from the micro app yet</p>
+                        <p className="text-xs text-muted mt-1 max-w-sm mx-auto">
+                          Pages sent with "Send to Content Studio" in the micro app land here, in Senior Review, with their Word document attached.
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm text-navy font-semibold">No saved drafts yet</p>
+                        <button
+                          onClick={() => setHomeTab('create')}
+                          className="text-xs text-orange font-bold uppercase tracking-wide mt-2 hover:text-orange-hover"
+                        >
+                          Pick a template to start writing →
+                        </button>
+                      </>
+                    )}
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
@@ -2118,7 +2162,15 @@ function ContentStudioApp() {
                                 {SCHEMA_DETAILS[draft.page_type]?.title || draft.page_type}
                               </span>
                             </td>
-                            <td className="py-4 px-4 font-medium text-muted">{getDraftListTitle(draft)}</td>
+                            <td className="py-4 px-4 font-medium text-muted">
+                              {getDraftListTitle(draft)}
+                              {draft.source === 'parser' && draft.source_filename && (
+                                <span className="flex items-center gap-1 text-[10px] text-muted/80 mt-0.5" title="The Word document it was imported from">
+                                  <FileText className="w-2.5 h-2.5 shrink-0" />
+                                  {draft.source_filename}
+                                </span>
+                              )}
+                            </td>
                             <td className="py-4 px-4" onClick={(e) => e.stopPropagation()}>
                               {currentUser.role === 'intern' || draft.status === 'approved' ? (
                                 <span className="block text-xs font-bold text-navy">{ownerNameOf(draft)}</span>

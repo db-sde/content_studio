@@ -91,6 +91,7 @@ export async function listDrafts() {
       keyed.id, keyed.page_type, keyed.status, keyed.allow_intern_ai_edit, keyed.created_by_user_id,
       keyed.prioritized_at, keyed.created_at, keyed.updated_at, keyed.wordpress_url,
       keyed.submitted_by_user_id, keyed.last_edited_by_user_id, keyed.assigned_to_user_id,
+      keyed.source, keyed.source_filename,
       COALESCE(keyed.assigned_to_user_id, keyed.created_by_user_id) AS owner_user_id,
       owner.name AS owner_name,
       keyed.university_name, keyed.university_full_name, keyed.program_name, keyed.spec_name,
