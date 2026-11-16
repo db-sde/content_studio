@@ -66,7 +66,7 @@ export async function listDrafts() {
     WITH base AS (
       SELECT
         id, page_type, status, allow_intern_ai_edit, created_by_user_id, prioritized_at, created_at, updated_at,
-        wordpress_url, submitted_by_user_id, last_edited_by_user_id, assigned_to_user_id,
+        wordpress_url, submitted_by_user_id, last_edited_by_user_id, assigned_to_user_id, source, source_filename,
         (form_data_json::json)->>'university_name' AS university_name,
         (form_data_json::json)->>'university_full_name' AS university_full_name,
         (form_data_json::json)->>'program_name' AS program_name,

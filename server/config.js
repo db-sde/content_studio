@@ -19,6 +19,10 @@ export const config = {
   // requests same-origin from the browser's point of view, so CORS never actually applies there.
   frontendUrl: process.env.FRONTEND_URL || '',
 
+  // Shared with the document parser (micro app): it signs every draft it hands over with this
+  // (POST /api/import/parser-draft). Unset = the import route is off.
+  parserImportSecret: process.env.PARSER_IMPORT_SECRET || '',
+
   anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
   anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
 

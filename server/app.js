@@ -11,6 +11,7 @@ import { costsRouter } from './routes/costs.js';
 import { directoryRouter } from './routes/directory.js';
 import { fieldSettingsRouter } from './routes/fieldSettings.js';
 import { imagePipelineRouter } from './routes/imagePipeline.js';
+import { importParserDraft } from './routes/parserImport.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireAuth } from './middleware/auth.js';
 import { apiRequestLimiter } from './middleware/limits.js';
@@ -28,6 +29,9 @@ export function createApp() {
   // browsers refuse to pair with credentials) when FRONTEND_URL isn't set keeps local dev working
   // zero-config — set FRONTEND_URL in production to lock this down to the real deployed frontend.
   app.use(cors({ origin: config.frontendUrl || true, credentials: true }));
+  // Server-to-server, signed (not a session) and before the 1 MB JSON parser: the body carries the
+  // page's Word document, and the signature is checked on the raw bytes. See routes/parserImport.js.
+  app.post('/api/import/parser-draft', express.raw({ type: 'application/json', limit: '12mb' }), importParserDraft);
   app.use(express.json({ limit: '1mb' }));
 
   // `commit` (Render sets RENDER_GIT_COMMIT) shows from outside which version is actually live

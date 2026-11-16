@@ -57,7 +57,7 @@ import {
   ArrowLeft, Save, Download, Eye, Copy, Trash2,
   History, Sparkles, CheckCircle, AlertCircle, X, ChevronRight,
   Check, CornerDownRight, ClipboardPaste, GraduationCap, BookOpen, Award, Pencil, Bell,
-  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock, RotateCw
+  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock, RotateCw, FileText
 } from 'lucide-react';
 import './App.css';
 
@@ -2621,6 +2621,24 @@ function ContentStudioApp() {
                   This {(SCHEMA_DETAILS[activePageType]?.title || 'page').toLowerCase()} is assigned to {(activeDraftMeta && ownerNameOf(activeDraftMeta)) || 'another intern'} - only they can edit it. You can read it, but your changes won't be saved.
                 </p>
               </div>
+            </div>
+          )}
+
+          {/* A page the document parser handed over: the senior fills it from the original Word file. */}
+          {activeDraftMeta?.source === 'parser' && activeDraftMeta?.source_filename && (
+            <div className="mx-6 mt-3 flex items-center gap-3 rounded-lg border border-navy/10 bg-white px-4 py-2.5 text-sm" id="source-document-bar">
+              <FileText className="w-4 h-4 text-navy/60 shrink-0" />
+              <span className="text-navy/80 truncate">
+                Imported from <span className="font-semibold text-navy">{activeDraftMeta.source_filename}</span> - check the fields against it and fill what is missing.
+              </span>
+              <a
+                href={`/api/drafts/${activeDraftMeta.id}/source-document`}
+                download={activeDraftMeta.source_filename}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy/90 shrink-0"
+                id="btn-download-source-document"
+              >
+                <Download className="w-3.5 h-3.5" /> Original document
+              </a>
             </div>
           )}
 

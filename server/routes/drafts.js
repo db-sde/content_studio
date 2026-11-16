@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getDb } from '../db/index.js';
 import { asyncRoute } from '../middleware/errorHandler.js';
 import { rateLimit } from '../middleware/rateLimit.js';
 import { imageGenerationLimiter } from '../middleware/limits.js';
@@ -505,6 +506,19 @@ draftsRouter.get('/:id/full-export', asyncRoute(async (req, res) => {
     evaluationLogs: await getEvaluationLogsByDraft(draft.id),
     fieldRecords: await getFieldRecordsByDraft(draft.id)
   });
+}));
+
+// The Word document a parser-imported draft came from (see routes/parserImport.js), for the senior
+// to fill the page from. Downloaded on request only; never part of the draft JSON or any poll.
+draftsRouter.get('/:id/source-document', asyncRoute(async (req, res) => {
+  const draft = await loadDraftOr404(req.params.id);
+  const db = await getDb();
+  const { rows } = await db.query('SELECT filename, content FROM draft_source_documents WHERE draft_id = $1', [draft.id]);
+  if (!rows[0]) throw notFound();
+  const name = String(rows[0].filename || 'document.docx').replace(/["\\\r\n]/g, '_');
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+  res.setHeader('Content-Disposition', `attachment; filename="${name}"`);
+  res.send(Buffer.from(rows[0].content));
 }));
 
 // The page's remarks history (see listDraftRemarks). Fetched when a draft is opened, never polled.
