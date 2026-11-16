@@ -402,6 +402,17 @@ const STATUS_ACTIONS = {
   }
 };
 
+// A draft sent from the micro app is credited to the Document Parser account, which no one can
+// sign in as. Sending it to Intern Editing before a Senior/Admin has assigned it to an intern would
+// leave it with no one able to edit it (and the "sent back" notice addressed to nobody).
+function assertHasInternBeforeIntern(draft, targetStatus) {
+  if (targetStatus === 'intern_editing' && draft.source === 'parser' && !draft.assigned_to_user_id) {
+    const err = new Error('This draft came from the micro app and has no intern yet - assign it to an intern (Intern column) first, then send it back.');
+    err.status = 409;
+    throw err;
+  }
+}
+
 draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
   const draft = await loadDraftOr404(req.params.id);
   const { action, message } = req.body || {};
@@ -423,6 +434,7 @@ draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
     if (targetStatus === draft.status) {
       const err = new Error('This draft is already in that status'); err.status = 409; throw err;
     }
+    assertHasInternBeforeIntern(draft, targetStatus);
     if (targetStatus === 'approved' && !validateState(draft.form_data, draft.page_type, { schema: (await getEffectiveSchemas())[draft.page_type] }).isValid) {
       const err = new Error('This draft still has required fields missing'); err.status = 409; throw err;
     }
@@ -464,6 +476,7 @@ draftsRouter.patch('/:id/status', asyncRoute(async (req, res) => {
   // An Intern can only hand off a draft that is theirs - without this, any Intern could push
   // another Intern's half-finished specialization to the Senior.
   assertCanActAsOwner(req.currentUser, draft);
+  assertHasInternBeforeIntern(draft, spec.newStatus);
   // An Intern sending on isn't held up by fields only a Senior/Admin may fill; approval still is.
   if (spec.requiresComplete && !validateState(draft.form_data, draft.page_type, {
     schema: (await getEffectiveSchemas())[draft.page_type],

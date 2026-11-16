@@ -175,3 +175,45 @@ test('an intern can see the document too (only seniors get the hand-off notifica
   const file = await fetch(`${t.baseUrl}/api/drafts/${rows[0].id}/source-document`, { headers: { cookie: I.cookie } });
   assert.equal(file.status, 200);
 });
+
+// Fill every field of a page type with a value its type accepts.
+async function everyFieldFilled(pageType) {
+  const { schemas } = await import('../src/config/schemas.js');
+  const data = {};
+  schemas[pageType].sections.forEach(sec => sec.fields.forEach(f => {
+    data[f.key] = f.type === 'REPEATER' ? [] : `Edited ${f.key}`;
+  }));
+  return data;
+}
+
+for (const pageType of ['university', 'course', 'specialization']) {
+  test(`a senior can edit every field of a ${pageType} sent from the micro app`, async () => {
+    const res = await send({ pageType, uploadId: `edit-${pageType}`, payload: { university_name: 'Editable University Online' } });
+    const id = res.body.draftId;
+    const formData = await everyFieldFilled(pageType);
+    const put = await t.api(S, 'PUT', `/api/drafts/${id}`, { formData });
+    assert.equal(put.status, 200, JSON.stringify(put.body));
+    assert.equal(put.body.skippedKeys, undefined, `locked for the senior: ${put.body.skippedKeys}`);
+    const saved = (await t.api(S, 'GET', `/api/drafts/${id}`)).body.draft;
+    for (const [k, v] of Object.entries(formData)) assert.deepEqual(saved.form_data[k], v, k);
+    assert.equal(saved.last_edited_by_user_id, S.id);
+  });
+}
+
+test('sent back to an intern: the intern it is assigned to can edit it', async () => {
+  const res = await send({ pageType: 'course', uploadId: 'to-intern', payload: { program_name: 'Some Online MBA program' } });
+  const id = res.body.draftId;
+  // While it's with the senior, an intern's edits are not applied.
+  let put = await t.api(I, 'PUT', `/api/drafts/${id}`, { formData: { program_name: 'Intern edit' } });
+  assert.deepEqual(put.body.skippedKeys, ['program_name']);
+  // No intern yet: sending it back would leave it with no one able to edit it, so it's refused.
+  const refused = await t.api(S, 'PATCH', `/api/drafts/${id}/status`, { action: 'revert-to-intern', message: 'please fill' });
+  assert.equal(refused.status, 409);
+  assert.match(refused.body.error || refused.body.message || '', /assign it to an intern/);
+  // Assigned, then sent back: that intern can edit every field they normally could.
+  assert.equal((await t.api(S, 'PATCH', `/api/drafts/${id}/assign`, { userId: I.id })).status, 200);
+  assert.equal((await t.api(S, 'PATCH', `/api/drafts/${id}/status`, { action: 'revert-to-intern', message: 'please fill' })).status, 200);
+  put = await t.api(I, 'PUT', `/api/drafts/${id}`, { formData: { program_name: 'Intern edit' } });
+  assert.equal(put.status, 200, JSON.stringify(put.body));
+  assert.equal(put.body.draft.form_data.program_name, 'Intern edit');
+});
