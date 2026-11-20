@@ -142,6 +142,19 @@ const hiringPartners = (pageType) => (value) => {
   return html ? { [HIRING_PARTNERS_FIELD[pageType]]: html } : {};
 };
 
+// Accreditation cards: the theme shows the body's name only as a small badge, so the card's heading
+// (the grade / status column) must name the body itself: "Approved" -> "AICTE Approved", "A++ Grade"
+// -> "NAAC A++ Grade". Left alone when it already names the body, or is empty.
+const bodyWords = (s) => htmlToText(s).toLowerCase().replace(/[^a-z0-9+#]+/g, ' ').trim();
+export function namedAccreditations(rows, nameKey, descKey) {
+  return (Array.isArray(rows) ? rows : []).map(row => {
+    const name = htmlToText(row?.[nameKey]);
+    const desc = htmlToText(row?.[descKey]);
+    if (!name || !desc || ` ${bodyWords(desc)} `.includes(` ${bodyWords(name)} `)) return row;
+    return { ...row, [descKey]: `${name} ${desc}` };
+  });
+}
+
 // Per page type: what each Content Studio field becomes on WordPress. Each entry gets the field's
 // value and returns { wpKey: value, ... } to send in its place (an empty object = not sent).
 const toHtmlList = (wpKey, titleKey, descKey) => (rows) => ({ [wpKey]: rowsToHtmlList(rows, titleKey, descKey) });
@@ -184,6 +197,7 @@ const FIELD_MAPS = {
     facts: toHtmlList('facts_content', 'fact_title', 'fact_description'),
     exam_details: remapRows('examination_cards', { detail_label: 'exam_card_title', detail_value: 'exam_card_description' }),
     hiring_partners: hiringPartners('university'),
+    accreditations: (rows) => ({ accreditations: namedAccreditations(rows, 'body_name', 'body_descriptor') }),
     // The EMI partners' bank names, as chips (the terms stay facts for the AI's EMI text).
     emi_partners: (rows) => partnerBanks('university')((Array.isArray(rows) ? rows : []).map(r => htmlToText(r?.bank_name)).filter(Boolean).join('\n')),
     faculty_members: (rows) => ({
@@ -200,6 +214,7 @@ const FIELD_MAPS = {
     validity: (value) => ({ program_validity: value }),
     hiring_partners: hiringPartners('course'),
     partner_banks: partnerBanks('course'),
+    course_accreditations: (rows) => ({ course_accreditations: namedAccreditations(rows, 'course_body_name', 'course_body_descriptor') }),
     emi_amount: (value) => ({ emi_amount: emiFigure(value) }),
     // On course pages the paragraph above the syllabus is course_syllabus_description.
     syllabus_section_paragraph: rename('course_syllabus_description'),

@@ -261,7 +261,7 @@ test("course and university fields map onto the site's own (and pass its field r
   assert.deepEqual(c.fields.course_academic_years, [{ course_year_title: 'Year 1', course_semesters: [{ course_semester_title: 'Year 1', course_semester_subjects: '<ul><li>C</li></ul>' }] }]);
   assert.equal(c.fields.annual_plan_amount, '50,000');
   // Accreditations (with a description each) and specializations (with a fee each) publish under the site's own fields.
-  assert.deepEqual(c.fields.course_accreditations, [{ course_body_name: 'NAAC', course_body_descriptor: 'A+ Grade', course_body_detail: 'Accredited with A+' }]);
+  assert.deepEqual(c.fields.course_accreditations, [{ course_body_name: 'NAAC', course_body_descriptor: 'NAAC A+ Grade', course_body_detail: 'Accredited with A+' }], 'the card heading names the body');
   assert.deepEqual(c.fields.specialization, [{ specialization_name: 'Data Science', specialization_details: 'INR 24,750/- per semester' }, { specialization_name: 'Cloud', specialization_details: '' }]);
   assert.equal(c.fields.num_specializations, '8', 'the number the intern typed, not the length of the list');
   assert.equal(c.fields.specializations_intro, 'Choose from several specializations.\nEach has its own fee.');
@@ -357,6 +357,23 @@ test('values the page shows as stats: filled from what the page has, cleaned of 
 
   const uni = conformToSchema(mapToWordPress({ university_name: 'VGU Online', nirf_rank: '#95', emi_interest_rate_value: '0%' }, 'university').fields, SCHEMAS.university);
   assert.deepEqual([uni.fields.nirf_rank, uni.fields.emi_interest_rate_value, uni.skipped], ['#95', '0%', []]);
+});
+
+test('accreditation card headings name the body: "AICTE Approved", not just "Approved"', () => {
+  const rows = [
+    { course_body_name: 'AICTE', course_body_descriptor: 'Approved', course_body_detail: 'Approved by the All India Council for Technical Education.' },
+    { course_body_name: 'NAAC', course_body_descriptor: 'A++ Grade', course_body_detail: 'x' },
+    { course_body_name: 'NIRF', course_body_descriptor: '#24 University, #40 Overall', course_body_detail: 'x' },
+    { course_body_name: 'UGC', course_body_descriptor: 'UGC Entitled', course_body_detail: 'x' },
+    { course_body_name: 'NAAC', course_body_descriptor: 'Accredited by naac', course_body_detail: 'x' },
+    { course_body_name: 'WES', course_body_descriptor: '', course_body_detail: 'x' }
+  ];
+  const sent = conformToSchema(mapToWordPress({ course_accreditations: rows }, 'course').fields, SCHEMAS.course);
+  assert.deepEqual(sent.fields.course_accreditations.map(r => r.course_body_descriptor),
+    ['AICTE Approved', 'NAAC A++ Grade', 'NIRF #24 University, #40 Overall', 'UGC Entitled', 'Accredited by naac', ''], 'already named, or empty: left alone');
+  assert.equal(sent.fields.course_accreditations[0].course_body_detail, rows[0].course_body_detail);
+  const uni = mapToWordPress({ accreditations: [{ body_name: 'UGC-DEB', body_descriptor: 'Entitled', body_detail: 'x' }] }, 'university').fields;
+  assert.equal(uni.accreditations[0].body_descriptor, 'UGC-DEB Entitled');
 });
 
 test('what the theme adds by itself is taken off before sending', () => {
