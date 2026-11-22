@@ -23,7 +23,7 @@ function routeBlocks(file) {
 const allRoutes = listFiles('server/routes', ['.js']).flatMap(routeBlocks);
 
 test('every route that can call Claude/GPT is behind the daily AI budget AND a per-user rate limit', () => {
-  const aiCallers = allRoutes.filter(r => /generateAndEvaluateField\(|generateAllAiFields\(|Provider\.complete\(/.test(r.body));
+  const aiCallers = allRoutes.filter(r => /generateAndEvaluateField\(|generateAllAiFields\(|Provider\.complete\(|generateSummaryFields\(|generateSummary\(|generateSeo\(/.test(r.body));
   assert.ok(aiCallers.length >= 3, `expected the known AI routes, found ${aiCallers.map(r => r.path)}`);
   for (const r of aiCallers) {
     assert.match(r.body, /requireAiBudget/, `${r.file} ${r.verb.toUpperCase()} ${r.path} calls an AI model without requireAiBudget`);

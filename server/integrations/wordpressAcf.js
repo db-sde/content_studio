@@ -1,3 +1,5 @@
+import { cleanSummaryHtml } from '../../src/config/summaryPages.js';
+
 // Turns a draft's exported fields (src/config/schemas.js's transformToACF) into the "acf" object the
 // DegreeBaba WordPress site accepts. Pure functions - no network - so every rule is unit-tested
 // (tests/wordpress.test.js); wordpressClient.js does the fetching and sending.
@@ -155,6 +157,9 @@ export function namedAccreditations(rows, nameKey, descKey) {
   });
 }
 
+// Blog / category: the summary goes as one clean <ul> (see summaryPages.js); the other fields as typed.
+const summaryList = (value) => ({ complete_page_summary: cleanSummaryHtml(value) });
+
 // Per page type: what each Content Studio field becomes on WordPress. Each entry gets the field's
 // value and returns { wpKey: value, ... } to send in its place (an empty object = not sent).
 const toHtmlList = (wpKey, titleKey, descKey) => (rows) => ({ [wpKey]: rowsToHtmlList(rows, titleKey, descKey) });
@@ -193,6 +198,8 @@ const partnerBanks = (pageType) => (value) => {
 };
 
 const FIELD_MAPS = {
+  blog: { complete_page_summary: summaryList },
+  category: { complete_page_summary: summaryList },
   university: {
     facts: toHtmlList('facts_content', 'fact_title', 'fact_description'),
     exam_details: remapRows('examination_cards', { detail_label: 'exam_card_title', detail_value: 'exam_card_description' }),
@@ -347,12 +354,12 @@ export function mapToWordPress(acf, pageType) {
 // BA"), which several universities share; the title then leads with the university, as the
 // document's own title does ("Lovely Professional University Online BA").
 const BARE_PROGRAM_RE = /^(online|distance|executive|mba|mca|bba|bca|m\.?\s?com|b\.?\s?com|m\.?\s?sc|b\.?\s?sc|ma|ba|pgdm|dba|phd|m\.?\s?tech|b\.?\s?tech|pg|diploma|certificate)\b/i;
-const TITLE_FIELD = { university: 'university_name', course: 'program_name', specialization: 'spec_name' };
+const TITLE_FIELD = { university: 'university_name', course: 'program_name', specialization: 'spec_name', blog: 'seo_title', category: 'seo_title' };
 const normalizeWords = (s) => htmlToText(s).toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]+/g, ' ').trim();
 export function pageTitle(pageType, formData) {
   const name = htmlToText(formData?.[TITLE_FIELD[pageType]]);
   const university = htmlToText(formData?.university_name);
-  if (pageType === 'university' || !name || !university || !BARE_PROGRAM_RE.test(name)) return name || 'Untitled';
+  if (!['course', 'specialization'].includes(pageType) || !name || !university || !BARE_PROGRAM_RE.test(name)) return name || 'Untitled';
   const stem = university.replace(/\s+online$/i, '');
   if (normalizeWords(name).includes(normalizeWords(stem))) return name;
   const online = /\s+online$/i.test(university) || /^online\b/i.test(name);

@@ -11,6 +11,7 @@ import { config } from '../config.js';
 import { getDraftById } from '../repositories/draftsRepo.js';
 import { getEffectiveSchemas } from '../repositories/fieldSettingsRepo.js';
 import { aiFieldsOf } from '../../src/config/fieldSettings.js';
+import { isSummaryPageType } from '../../src/config/summaryPages.js';
 
 export const aiRouter = Router();
 
@@ -41,6 +42,9 @@ aiRouter.post(
     const draft = await getDraftById(draftId);
     if (!draft) {
       const err = new Error('Draft not found'); err.status = 404; throw err;
+    }
+    if (isSummaryPageType(draft.page_type)) {
+      const err = new Error('Blog and category summaries are written from their document - use Regenerate on the field.'); err.status = 400; throw err;
     }
     if (draft.status !== REVIEW_STAGE_BY_ROLE[req.currentUser.role]) {
       const err = new Error('This draft is not in review with you right now'); err.status = 409; throw err;

@@ -2,6 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { config, assertWordpressConfigured } from '../config.js';
 import { mapToWordPress, conformToSchema, pickLinkedPost, pageTitle, LINKED_FIELDS } from './wordpressAcf.js';
+import { isSummaryPageType } from '../../src/config/summaryPages.js';
 
 // The only file that talks to WordPress directly. Authenticates with an Application Password
 // (WP Admin > Users > profile > Application Passwords) via HTTP Basic auth — this is WordPress's
@@ -292,25 +293,32 @@ async function pageTerms(pageType, acfFields, available) {
 export async function publishDraftToWordPress({ pageType, title, acfFields, existingPostId }) {
   assertWordpressConfigured();
   const slug = postTypeSlug(pageType);
+  // Blog posts and category pages (see src/config/summaryPages.js) publish as the micro app did:
+  // their few fields go as they are, with no field-list check; the summary is also the post's body
+  // (content); and a new post whose fields WordPress refuses is deleted again (see below).
+  const summaryPage = isSummaryPageType(pageType);
 
   const mapped = mapToWordPress(acfFields, pageType);
   let schema = null;
   let topLevel = [];
   const skipped = [...mapped.skipped];
-  try {
-    ({ schema, topLevel } = await postTypeSchema(slug));
-  } catch (e) {
-    console.warn(`[wordpress] couldn't read the ${slug} field list (${e.message}); publishing without the schema check`);
+  if (!summaryPage) {
+    try {
+      ({ schema, topLevel } = await postTypeSchema(slug));
+    } catch (e) {
+      console.warn(`[wordpress] couldn't read the ${slug} field list (${e.message}); publishing without the schema check`);
+    }
   }
-  const conformed = conformToSchema(mapped.fields, schema);
+  const conformed = summaryPage ? { fields: mapped.fields, skipped: [] } : conformToSchema(mapped.fields, schema);
   skipped.push(...conformed.skipped);
   const linked = await findLinkedPostIds(pageType, mapped.linkedNames, acfFields.university_name);
   skipped.push(...linked.notes);
   const acf = { ...conformed.fields, ...linked.ids };
   const tags = await pageTerms(pageType, acfFields, topLevel);
   skipped.push(...tags.notes);
+  const content = summaryPage ? { content: mapped.fields.complete_page_summary || '' } : {};
 
-  const fill = (postId) => wpRequest('PUT', `${slug}/${postId}`, { slug, json: { title, status: 'publish', acf, ...tags.terms } });
+  const fill = (postId) => wpRequest('PUT', `${slug}/${postId}`, { slug, json: { title, status: 'publish', acf, ...tags.terms, ...content } });
 
   // Re-publishing: update the page published last time, unless it has since been deleted in
   // WordPress or moved to its Trash. A trashed page is left there rather than updated: WordPress
@@ -329,6 +337,22 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
       }
     }
     recreated = !post;
+  }
+  if (!post && summaryPage) {
+    // Created as a draft with its title and body, then given its fields and real status (this site
+    // drops "acf" sent with a create). If WordPress refuses the fields, the empty post is deleted
+    // outright, so no blank page is left behind and its address isn't taken for the next try.
+    const created = await wpRequest('POST', slug, { slug, json: { title, status: 'draft', ...content } });
+    try {
+      post = await wpRequest('PUT', `${slug}/${created.id}`, { slug, json: { acf, status: 'publish' } });
+    } catch (e) {
+      try {
+        await wpRequest('DELETE', `${slug}/${created.id}?force=true`, { slug });
+      } catch (cleanupError) {
+        console.error(`[wordpress] couldn't delete the empty ${slug} ${created.id} after a failed publish: ${cleanupError.message}`);
+      }
+      throw e;
+    }
   }
   if (!post) {
     const created = await wpRequest('POST', slug, { slug, json: { title, status: 'draft' } });

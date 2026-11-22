@@ -7,7 +7,9 @@ import {
 export const PAGE_TYPES = {
   UNIVERSITY: 'university',
   COURSE: 'course',
-  SPECIALIZATION: 'specialization'
+  SPECIALIZATION: 'specialization',
+  BLOG: 'blog',
+  CATEGORY: 'category'
 };
 
 // Shared repeater sub-field configs (reused across page types where the ACF spec repeats them)
@@ -588,6 +590,66 @@ export const schemas = {
         ]
       }
     ]
+  },
+  // Blog posts and category pages (see config/summaryPages.js): made from an uploaded Word file.
+  [PAGE_TYPES.BLOG]: {
+    id: PAGE_TYPES.BLOG,
+    title: 'Blog Post',
+    sections: [
+      {
+        id: 'summary',
+        title: 'Page Summary',
+        icon: 'FileText',
+        description: 'The 4-5 short bullet points shown at the top of the page, written from the uploaded document.',
+        fields: [
+          { key: 'complete_page_summary', type: 'RICH_TEXT', label: 'Complete Page Summary', placeholder: '4-5 short bullet points', aiAssist: { instructions: 'You are an expert content writer for an education platform. Read the raw text of a Blog or Category page and generate an engaging Complete Page Summary placed at the top of the page. It must be highly appealing and optimised for short attention spans: exactly 4-5 key bullet points, each extremely brief. Return only a raw HTML <ul> with <li> items.' } }
+        ]
+      },
+      {
+        id: 'seo',
+        title: 'Search Result',
+        icon: 'BarChart3',
+        description: 'How the page appears in Google. The SEO title is also the page title on WordPress.',
+        fields: [
+          { key: 'seo_title', type: 'TEXT_INPUT', label: 'SEO Title', placeholder: '50-60 characters, keyword-rich', aiAssist: { instructions: 'Write a compelling, keyword-rich SEO title of 50-60 characters (max 60 characters).' } },
+          { key: 'meta_description', type: 'TEXTAREA', label: 'Meta Description', placeholder: '140-160 characters that make someone click', rows: 3, aiAssist: { instructions: 'Write a meta description of 140-160 characters (max 160 characters): a search snippet that drives clicks.' } }
+        ]
+      },
+      {
+        id: 'reading',
+        title: 'Reading Time',
+        icon: 'BookOpen',
+        description: 'Calculated from the document\'s word count (200 words a minute).',
+        fields: [
+          { key: 'reading_time', type: 'TEXT_INPUT', label: 'Reading Time', placeholder: 'e.g. 6 min read' }
+        ]
+      }
+    ]
+  },
+  [PAGE_TYPES.CATEGORY]: {
+    id: PAGE_TYPES.CATEGORY,
+    title: 'Category Page',
+    sections: [
+      {
+        id: 'summary',
+        title: 'Page Summary',
+        icon: 'FileText',
+        description: 'The 4-5 short bullet points shown at the top of the page, written from the uploaded document.',
+        fields: [
+          { key: 'complete_page_summary', type: 'RICH_TEXT', label: 'Complete Page Summary', placeholder: '4-5 short bullet points', aiAssist: { instructions: 'You are an expert content writer for an education platform. Read the raw text of a Blog or Category page and generate an engaging Complete Page Summary placed at the top of the page. It must be highly appealing and optimised for short attention spans: exactly 4-5 key bullet points, each extremely brief. Return only a raw HTML <ul> with <li> items.' } }
+        ]
+      },
+      {
+        id: 'seo',
+        title: 'Search Result',
+        icon: 'BarChart3',
+        description: 'How the page appears in Google. The SEO title is also the page title on WordPress.',
+        fields: [
+          { key: 'seo_title', type: 'TEXT_INPUT', label: 'SEO Title', placeholder: '50-60 characters, keyword-rich', aiAssist: { instructions: 'Write a compelling, keyword-rich SEO title of 50-60 characters (max 60 characters).' } },
+          { key: 'meta_description', type: 'TEXTAREA', label: 'Meta Description', placeholder: '140-160 characters that make someone click', rows: 3, aiAssist: { instructions: 'Write a meta description of 140-160 characters (max 160 characters): a search snippet that drives clicks.' } }
+        ]
+      }
+    ]
   }
 };
 
@@ -636,6 +698,18 @@ schemas[PAGE_TYPES.UNIVERSITY].sections.forEach(section => {
   });
 });
 
+// Blog and category pages: the AI writes every field from the uploaded document at once, and the
+// team then edits all of them - the intern who uploaded it included. Every field is needed to
+// publish (the SEO title is the page's title on WordPress).
+[PAGE_TYPES.BLOG, PAGE_TYPES.CATEGORY].forEach(pageType => {
+  schemas[pageType].sections.forEach(section => {
+    section.fields.forEach(field => {
+      field.required = true;
+      if (field.aiAssist) field.internWritable = true;
+    });
+  });
+});
+
 // Derive display metadata (field counts) directly from the schemas above so it can never drift
 const countFields = (schema) => schema.sections.reduce((sum, sec) => sum + sec.fields.length, 0);
 
@@ -657,6 +731,22 @@ export const SCHEMA_DETAILS = {
     title: 'Specialization Page',
     fieldCount: countFields(schemas[PAGE_TYPES.SPECIALIZATION]),
     estimatedTime: '35 mins'
+  },
+  // Made from an uploaded document rather than started blank: the Create tab shows one "Blog /
+  // Category Summary" card for both (summaryPage), not a card each.
+  [PAGE_TYPES.BLOG]: {
+    id: PAGE_TYPES.BLOG,
+    title: 'Blog Post',
+    fieldCount: countFields(schemas[PAGE_TYPES.BLOG]),
+    estimatedTime: '5 mins',
+    summaryPage: true
+  },
+  [PAGE_TYPES.CATEGORY]: {
+    id: PAGE_TYPES.CATEGORY,
+    title: 'Category Page',
+    fieldCount: countFields(schemas[PAGE_TYPES.CATEGORY]),
+    estimatedTime: '5 mins',
+    summaryPage: true
   }
 };
 

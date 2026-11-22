@@ -51,17 +51,26 @@ function usageFrom(response) {
   };
 }
 
-export async function complete({ system, cachedPrefix = null, prompt, maxTokens = 1024, timeoutMs = 30000, model }) {
-  const anthropic = getClient();
+// `temperature` is optional. Some newer models accept only their default sampling and answer a
+// request that sets it with a 400; then the call is repeated once without it (a refused request isn't
+// billed), and later calls to that model leave it out.
+const modelsWithoutTemperature = new Set();
+const temperatureRefused = (e) => e?.status === 400 && /temperature/i.test(String(e?.message || e?.error?.error?.message || ''));
 
-  const response = await anthropic.messages.create(
-    {
-      model: model || config.anthropicModel,
-      max_tokens: maxTokens,
-      ...requestBody({ system, cachedPrefix, prompt })
-    },
-    { timeout: timeoutMs }
-  );
+export async function complete({ system, cachedPrefix = null, prompt, maxTokens = 1024, timeoutMs = 30000, model, temperature }) {
+  const anthropic = getClient();
+  const useModel = model || config.anthropicModel;
+  const body = { model: useModel, max_tokens: maxTokens, ...requestBody({ system, cachedPrefix, prompt }) };
+  const withTemperature = temperature !== undefined && !modelsWithoutTemperature.has(useModel);
+
+  let response;
+  try {
+    response = await anthropic.messages.create(withTemperature ? { ...body, temperature } : body, { timeout: timeoutMs });
+  } catch (e) {
+    if (!withTemperature || !temperatureRefused(e)) throw e;
+    modelsWithoutTemperature.add(useModel);
+    response = await anthropic.messages.create(body, { timeout: timeoutMs });
+  }
 
   // stopReason 'max_tokens' means the text (if any) was cut off - see writer.generateField.
   const textBlock = response.content.find(block => block.type === 'text');

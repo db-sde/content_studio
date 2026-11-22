@@ -48,7 +48,7 @@ const norm = (col) => `btrim(regexp_replace(regexp_replace(lower(coalesce(${col}
 //     joins - so the list can show which Intern a specialization belongs to without a second
 //     round-trip per row;
 //   - dup_rank / dup_total: duplicate detection. Two drafts are the same entry when they share
-//     page type + university + title (case, punctuation and filler words like "Online" ignored). dup_rank 1 is the earliest
+//     page type + university + title - for blog / category pages, page type + SEO title (case, punctuation and filler words like "Online" ignored). dup_rank 1 is the earliest
 //     ("original"), anything higher is a repeat; dup_total is how many drafts share that key.
 //     Both are NULL for a draft with no title yet - an unnamed draft can't be a duplicate of
 //     anything, and shouldn't make every other unnamed draft look like one.
@@ -70,7 +70,9 @@ export async function listDrafts() {
         (form_data_json::json)->>'university_name' AS university_name,
         (form_data_json::json)->>'university_full_name' AS university_full_name,
         (form_data_json::json)->>'program_name' AS program_name,
-        (form_data_json::json)->>'spec_name' AS spec_name
+        (form_data_json::json)->>'spec_name' AS spec_name,
+        (form_data_json::json)->>'seo_title' AS seo_title,
+        EXISTS (SELECT 1 FROM draft_source_documents d WHERE d.draft_id = drafts.id) AS has_source_document
       FROM drafts
     ),
     keyed AS (
@@ -83,6 +85,8 @@ export async function listDrafts() {
             page_type || '|' || ${norm('university_name')} || '|' || ${norm('program_name')}
           WHEN page_type = 'university' AND ${norm('university_name')} <> '' THEN
             page_type || '|' || ${norm('university_name')}
+          WHEN page_type IN ('blog', 'category') AND ${norm('seo_title')} <> '' THEN
+            page_type || '|' || ${norm('seo_title')}
           ELSE NULL
         END AS dup_key
       FROM base
@@ -91,7 +95,7 @@ export async function listDrafts() {
       keyed.id, keyed.page_type, keyed.status, keyed.allow_intern_ai_edit, keyed.created_by_user_id,
       keyed.prioritized_at, keyed.created_at, keyed.updated_at, keyed.wordpress_url,
       keyed.submitted_by_user_id, keyed.last_edited_by_user_id, keyed.assigned_to_user_id,
-      keyed.source, keyed.source_filename,
+      keyed.source, keyed.source_filename, keyed.has_source_document, keyed.seo_title,
       COALESCE(keyed.assigned_to_user_id, keyed.created_by_user_id) AS owner_user_id,
       owner.name AS owner_name,
       keyed.university_name, keyed.university_full_name, keyed.program_name, keyed.spec_name,

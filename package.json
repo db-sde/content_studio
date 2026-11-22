@@ -31,6 +31,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "lucide-react": "^1.17.0",
+    "mammoth": "^1.13.0",
     "marked": "^15.0.7",
     "multer": "^2.2.0",
     "openai": "^4.104.0",

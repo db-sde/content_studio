@@ -20,6 +20,12 @@ import { generateImages, getGenerationStatus, getImageHistory, regenerateImage, 
 import { upsertDirectoryEntry } from '../repositories/directoryRepo.js';
 import { getEffectiveSchemas, getPublishSchemas } from '../repositories/fieldSettingsRepo.js';
 import { aiFieldsOf, fieldsOutOfInternReach } from '../../src/config/fieldSettings.js';
+import crypto from 'node:crypto';
+import { withTransaction } from '../db/pgPool.js';
+import { getInitialState } from '../../src/config/schemas.js';
+import { isSummaryPageType, SUMMARY_AI_FIELDS, readingTimeOf } from '../../src/config/summaryPages.js';
+import { generateSummaryFields, generateSummary, generateSeo } from '../ai/blogSummary.js';
+import { acceptSummaryDocument, documentText, safeFilename, UPLOAD_SOURCE } from '../integrations/summaryDocument.js';
 
 export const draftsRouter = Router();
 
@@ -31,7 +37,9 @@ const DRAFT_ID_RE = /^draft_\d+$/;
 const TITLE_FIELD_BY_PAGE_TYPE = {
   university: 'university_name',
   course: 'program_name',
-  specialization: 'spec_name'
+  specialization: 'spec_name',
+  blog: 'seo_title',
+  category: 'seo_title'
 };
 
 const DRAFT_STATUSES = ['intern_editing', 'senior_review', 'admin_review', 'approved'];
@@ -119,6 +127,119 @@ draftsRouter.post('/', asyncRoute(async (req, res) => {
 draftsRouter.get('/:id', asyncRoute(async (req, res) => {
   res.json({ draft: await loadDraftOr404(req.params.id) });
 }));
+
+// --- Blog & Category Summary (see src/config/summaryPages.js) ----------------------------------------
+// A writer uploads the page as a Word file; the app reads its text, writes the summary and the SEO
+// title/description, and creates the draft - with the document kept alongside it - in the uploader's
+// hands, like a draft they started themselves.
+//
+// `uploadKey` (sent by the browser, from the file's name, size and date) makes the upload safe to send
+// twice: the same user uploading the same file for the same page type gets the draft it already made,
+// not a second one - and a second request arriving while the first is still writing waits for it
+// instead of paying for the AI again.
+const summaryUploadsInFlight = new Map();
+
+draftsRouter.post(
+  '/summary-upload',
+  rateLimit({ windowMs: 5 * 60 * 1000, max: 10, keyFn: (req) => req.currentUser.id }),
+  requireAiBudget,
+  acceptSummaryDocument,
+  asyncRoute(async (req, res) => {
+    const pageType = String(req.body?.pageType || '');
+    if (!isSummaryPageType(pageType)) {
+      const err = new Error('Choose whether this is a blog post or a category page.'); err.status = 400; throw err;
+    }
+    if (!req.file) {
+      const err = new Error('Choose a Word document (.docx) to summarize.'); err.status = 400; throw err;
+    }
+    const key = String(req.body?.uploadKey || '') || crypto.createHash('sha256').update(req.file.buffer).digest('hex');
+    const sourceRef = crypto.createHash('sha256').update(`${req.currentUser.id}|${pageType}|${key}`).digest('hex').slice(0, 40);
+
+    const db = await getDb();
+    const existingDraft = async () => {
+      const { rows } = await db.query('SELECT id FROM drafts WHERE source = $1 AND source_ref = $2', [UPLOAD_SOURCE, sourceRef]);
+      return rows[0] ? getDraftById(rows[0].id) : null;
+    };
+    const already = await existingDraft();
+    if (already) {
+      res.json({ draft: already, existed: true });
+      return;
+    }
+
+    let job = summaryUploadsInFlight.get(sourceRef);
+    if (!job) {
+      job = (async () => {
+        const text = await documentText(req.file.buffer);
+        const id = `draft_${Date.now()}${Math.floor(Math.random() * 1000)}`;
+        const { fields, seoError } = await generateSummaryFields({ draftId: id, pageType, text });
+        const formData = { ...getInitialState(pageType), ...fields };
+        if (pageType === 'blog') formData.reading_time = readingTimeOf(text);
+        // What the AI wrote, kept so the editor can tell a field changed by hand before replacing it.
+        formData.generated_values = { ...fields };
+        const filename = safeFilename(req.file.originalname);
+        try {
+          await withTransaction(async (client) => {
+            await client.query(`
+              INSERT INTO drafts (id, page_type, form_data_json, created_by_user_id, last_edited_by_user_id, source, source_ref, source_filename)
+              VALUES ($1, $2, $3, $4, $4, $5, $6, $7)
+            `, [id, pageType, JSON.stringify(formData), req.currentUser.id, UPLOAD_SOURCE, sourceRef, filename]);
+            await client.query('INSERT INTO draft_source_documents (draft_id, filename, content) VALUES ($1, $2, $3)', [id, filename, req.file.buffer]);
+          });
+        } catch (e) {
+          const raced = e.code === '23505' ? await existingDraft() : null; // the same upload, finished first
+          if (raced) return { draft: raced, existed: true, seoError: null };
+          throw e;
+        }
+        return { draft: await getDraftById(id), existed: false, seoError };
+      })().finally(() => summaryUploadsInFlight.delete(sourceRef));
+      summaryUploadsInFlight.set(sourceRef, job);
+    }
+    const result = await job;
+    res.status(result.existed ? 200 : 201).json(result);
+  })
+);
+
+// Rewrites one of the summary page's AI fields from its stored document. Allowed to whoever may edit
+// that field and holds the draft right now (the owner while it's with the intern, the senior during
+// senior review, the admin during admin review) - the same rule as the other AI fields. Returns the
+// new text; the editor puts it in the field and saves as usual.
+const SUMMARY_STAGE_BY_ROLE = { senior: 'senior_review', admin: 'admin_review' };
+
+draftsRouter.post(
+  '/:id/summary-regenerate',
+  rateLimit({ windowMs: 5 * 60 * 1000, max: 40, keyFn: (req) => req.currentUser.id }),
+  requireAiBudget,
+  asyncRoute(async (req, res) => {
+    const draft = await loadDraftOr404(req.params.id);
+    if (!isSummaryPageType(draft.page_type)) {
+      const err = new Error('Only blog and category summaries are regenerated this way'); err.status = 400; throw err;
+    }
+    const fieldKey = String(req.body?.fieldKey || '');
+    if (!SUMMARY_AI_FIELDS.includes(fieldKey)) {
+      const err = new Error('fieldKey must be complete_page_summary, seo_title or meta_description'); err.status = 400; throw err;
+    }
+    const isOwner = isDraftOwnerOrNotIntern(req.currentUser, draft) && (req.currentUser.role === 'intern' || getDraftOwnerId(draft) === req.currentUser.id);
+    const holdsIt = draft.status === 'intern_editing' ? isOwner : draft.status === SUMMARY_STAGE_BY_ROLE[req.currentUser.role];
+    const schema = (await getEffectiveSchemas())[draft.page_type];
+    const mayEdit = canEditFieldServer(draft.page_type, fieldKey, {
+      role: req.currentUser.role, draftStatus: draft.status, allowInternAiEdit: !!draft.allow_intern_ai_edit, isDraftOwner: isDraftOwnerOrNotIntern(req.currentUser, draft)
+    }, schema);
+    if (!holdsIt || !mayEdit) {
+      const err = new Error('This draft is not with you right now, so its fields can\'t be regenerated'); err.status = 403; throw err;
+    }
+
+    const db = await getDb();
+    const { rows } = await db.query('SELECT content FROM draft_source_documents WHERE draft_id = $1', [draft.id]);
+    if (!rows[0]) {
+      const err = new Error('The original document isn\'t stored with this draft, so this field can\'t be regenerated.'); err.status = 409; throw err;
+    }
+    const text = await documentText(Buffer.from(rows[0].content));
+    const value = fieldKey === 'complete_page_summary'
+      ? await generateSummary({ draftId: draft.id, pageType: draft.page_type, text })
+      : (await generateSeo({ draftId: draft.id, pageType: draft.page_type, text }))[fieldKey];
+    res.json({ fieldKey, value });
+  })
+);
 
 // Cheap status check for the open-draft poll (see getDraftStatusInfo) - everything the client
 // compares, none of the draft's content.
@@ -292,6 +413,9 @@ draftsRouter.post(
     const draft = await loadDraftOr404(req.params.id);
     if (!['intern', 'senior', 'admin'].includes(req.currentUser.role)) {
       const err = new Error('This role cannot trigger AI generation'); err.status = 403; throw err;
+    }
+    if (isSummaryPageType(draft.page_type)) {
+      const err = new Error('Blog and category summaries are written from their document - use Regenerate on the field.'); err.status = 400; throw err;
     }
     assertCanActAsOwner(req.currentUser, draft);
     if (draft.status !== 'intern_editing') {

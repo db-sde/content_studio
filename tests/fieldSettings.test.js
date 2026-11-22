@@ -180,7 +180,7 @@ test('bad changes are refused with a reason', async () => {
     [['specialization', 'faqs', { aiGenerated: true }], /only write text fields/],
     [['specialization', 'duration', { required: 'yes' }], /true, false or null/],
     [['specialization', 'nope', { required: true }], /Unknown field/],
-    [['blog', 'duration', { required: true }], /Unknown page type/],
+    [['newsletter', 'duration', { required: true }], /Unknown page type/],
     [['specialization', 'duration', {}], /Nothing to change/]
   ];
   for (const [[pageType, key, body], message] of cases) {
@@ -253,6 +253,6 @@ test('AI generation follows the settings, whatever the request lists', async () 
 test('the WordPress tag list answers even with WordPress not set up', async () => {
   const r = await t.api(intern, 'GET', '/api/field-settings/wordpress');
   assert.equal(r.status, 200);
-  assert.deepEqual(r.body.checkedLive, { university: false, course: false, specialization: false });
+  assert.deepEqual(r.body.checkedLive, { university: false, course: false, specialization: false, blog: false, category: false });
   assert.deepEqual(r.body.targets.course.validity, { kind: 'sent', wpKeys: ['program_validity'] });
 });

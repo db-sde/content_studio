@@ -18,7 +18,10 @@ export const SETTING_KEYS = ['visible', 'required', 'aiGenerated', 'internFillab
 export const LOCKED_FIELD_KEYS = {
   university: ['university_name'],
   course: ['program_name', 'university_name', 'linked_university'],
-  specialization: ['spec_name', 'university_name', 'linked_university', 'linked_course']
+  specialization: ['spec_name', 'university_name', 'linked_university', 'linked_course'],
+  // Blog / category: the SEO title is the post's title, the summary its body.
+  blog: ['seo_title', 'complete_page_summary'],
+  category: ['seo_title', 'complete_page_summary']
 };
 export const isLockedField = (pageType, fieldKey) => (LOCKED_FIELD_KEYS[pageType] || []).includes(fieldKey);
 

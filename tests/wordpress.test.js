@@ -145,7 +145,8 @@ function fullSpecialization() {
 }
 
 test("default post types are the site's own REST bases", () => {
-  assert.deepEqual(config.wordpress.postTypeSlugs, { university: 'university', course: 'course', specialization: 'specialization' });
+  // Blog posts are WordPress's own posts; category pages their own type ("categories" is the taxonomy).
+  assert.deepEqual(config.wordpress.postTypeSlugs, { university: 'university', course: 'course', specialization: 'specialization', blog: 'posts', category: 'category-page' });
 });
 
 test("a fully filled specialization passes the site's own field rules: created as a draft, then filled and made live", async () => {

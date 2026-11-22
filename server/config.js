@@ -54,7 +54,11 @@ export const config = {
     postTypeSlugs: {
       university: process.env.WORDPRESS_POST_TYPE_UNIVERSITY || 'university',
       course: process.env.WORDPRESS_POST_TYPE_COURSE || 'course',
-      specialization: process.env.WORDPRESS_POST_TYPE_SPECIALIZATION || 'specialization'
+      specialization: process.env.WORDPRESS_POST_TYPE_SPECIALIZATION || 'specialization',
+      // Found by trial against the live site: blog posts are WordPress's own posts; category pages
+      // are their own post type ("categories" is the taxonomy, not these pages).
+      blog: process.env.WORDPRESS_POST_TYPE_BLOG || 'posts',
+      category: process.env.WORDPRESS_POST_TYPE_CATEGORY || 'category-page'
     }
   },
 
