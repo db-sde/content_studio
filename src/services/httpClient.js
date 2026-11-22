@@ -71,6 +71,29 @@ export async function request(path, { method = 'GET', body, retryWhileWaking = m
   }
 }
 
+// A file upload (multipart form). Never re-sent automatically: if the server is waking up or the
+// connection drops, the caller shows the error with a Retry. The error carries the HTTP `status`
+// so the caller can tell a bad file from an AI failure.
+export async function postForm(path, formData) {
+  let res;
+  try {
+    res = await fetch(path, { method: 'POST', credentials: 'include', body: formData });
+  } catch (e) {
+    const err = new Error(`Couldn't reach the server (${e.message}). Check the connection and try again.`, { cause: e });
+    err.status = 0;
+    throw err;
+  }
+  if (res.ok) return res.json();
+  const payload = await errorPayloadOf(res);
+  const err = payload?.error
+    ? new Error(payload.error)
+    : WAKING_STATUSES.has(res.status)
+      ? new ServerWakingError('The server was starting up and did not answer in time. Please try again in a minute.')
+      : new Error(`Upload failed (${res.status})`);
+  err.status = res.status;
+  throw err;
+}
+
 export const getJSON = (path) => request(path);
 export const postJSON = (path, body, options = {}) => request(path, { method: 'POST', body, ...options });
 export const putJSON = (path, body) => request(path, { method: 'PUT', body, retryWhileWaking: true });

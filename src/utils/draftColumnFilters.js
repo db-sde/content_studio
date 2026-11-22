@@ -5,6 +5,7 @@
 // Review" and "Sent back". Option counts are faceted: each dropdown counts the drafts passing every
 // OTHER active filter, so the numbers always say what choosing that option would show.
 import { universityKey } from './universityFilter.js';
+import { isSummaryPageType } from '../config/summaryPages.js';
 
 export const ALL = 'all';
 
@@ -28,6 +29,8 @@ export function buildDraftColumns(h) {
     {
       id: 'university',
       values: (d) => {
+        // Blog posts and category pages aren't about one university.
+        if (isSummaryPageType(d.page_type)) return [{ key: '__summary_pages', label: 'Blog & category pages', order: 2 }];
         const name = String(d.university_name || '').trim();
         return [name ? { key: universityKey(name), label: name } : { key: universityKey(''), label: 'No university yet', order: 1 }];
       },
@@ -43,6 +46,8 @@ export function buildDraftColumns(h) {
       values: (d) => {
         if (h.isUntitled(d)) return [{ key: '__untitled', label: 'Untitled', order: 2 }];
         if (d.page_type === 'university') return [{ key: '__university_pages', label: 'University pages', order: 1 }];
+        if (d.page_type === 'blog') return [{ key: '__blog_posts', label: 'Blog posts', order: 1 }];
+        if (d.page_type === 'category') return [{ key: '__category_pages', label: 'Category pages', order: 1 }];
         const program = programOf(h.title(d));
         return [{ key: normalize(program), label: program }];
       },

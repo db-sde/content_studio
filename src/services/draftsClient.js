@@ -1,4 +1,4 @@
-import { getJSON, postJSON, putJSON, patchJSON, deleteJSON } from './httpClient.js';
+import { getJSON, postJSON, putJSON, patchJSON, deleteJSON, postForm } from './httpClient.js';
 
 export function listDrafts() {
   return getJSON('/api/drafts');
@@ -94,4 +94,19 @@ export function getCostSummary(id) {
 
 export function publishToWordPress(id) {
   return postJSON(`/api/drafts/${id}/publish-to-wordpress`, {});
+}
+
+// Blog & Category Summary: uploads the Word file and returns { draft, existed, seoError }.
+// `uploadKey` identifies this file (name, size, date) so sending it twice returns the same draft.
+export function uploadSummaryDocument({ file, pageType, uploadKey }) {
+  const form = new FormData();
+  form.append('pageType', pageType);
+  form.append('uploadKey', uploadKey);
+  form.append('document', file);
+  return postForm('/api/drafts/summary-upload', form);
+}
+
+// Rewrites one AI field of a blog / category draft from its stored document: { fieldKey, value }.
+export function regenerateSummaryField(id, fieldKey) {
+  return postJSON(`/api/drafts/${id}/summary-regenerate`, { fieldKey });
 }

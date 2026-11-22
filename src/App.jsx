@@ -57,8 +57,11 @@ import {
   ArrowLeft, Save, Download, Eye, Copy, Trash2,
   History, Sparkles, CheckCircle, AlertCircle, X, ChevronRight,
   Check, CornerDownRight, ClipboardPaste, GraduationCap, BookOpen, Award, Pencil, Bell,
-  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock, RotateCw, FileText
+  Flame, ShieldCheck, Globe, ExternalLink, ChevronDown, LayoutGrid, FolderOpen, Images, Search, Lock, RotateCw, FileText, Newspaper
 } from 'lucide-react';
+import { SummaryUploadPanel } from './components/SummaryUploadPanel';
+import { SummaryField, SeoField, SerpPreview, ReadingTimeField } from './components/SummaryFields';
+import { isSummaryPageType, SUMMARY_AI_FIELDS } from './config/summaryPages';
 import './App.css';
 
 // Per-page-type icon + blurb for the home screen template cards. Purely cosmetic — deliberately
@@ -276,6 +279,9 @@ function ContentStudioApp() {
 
   // Local UI States
   const [showInvitePanel, setShowInvitePanel] = useState(false);
+  // Blog / Category Summary: the upload panel, and which field is being rewritten right now.
+  const [showSummaryUpload, setShowSummaryUpload] = useState(false);
+  const [regeneratingField, setRegeneratingField] = useState(null);
   const [showStyleReview, setShowStyleReview] = useState(false);
   const [showActivity, setShowActivity] = useState(false);
   const [showFieldSettings, setShowFieldSettings] = useState(false);
@@ -587,12 +593,14 @@ function ContentStudioApp() {
     if (draft.page_type === PAGE_TYPES.SPECIALIZATION) return draft.spec_name || 'Untitled Specialization';
     if (draft.page_type === PAGE_TYPES.COURSE) return draft.program_name || 'Untitled Course';
     if (draft.page_type === PAGE_TYPES.UNIVERSITY) return draft.university_full_name || draft.university_name || 'Untitled University';
+    if (isSummaryPageType(draft.page_type)) return draft.seo_title || `Untitled ${SCHEMA_DETAILS[draft.page_type].title}`;
     return 'Untitled Page';
   };
 
   const isUntitledDraft = (draft) => {
     if (draft.page_type === PAGE_TYPES.SPECIALIZATION) return !(draft.spec_name || '').trim();
     if (draft.page_type === PAGE_TYPES.COURSE) return !(draft.program_name || '').trim();
+    if (isSummaryPageType(draft.page_type)) return !(draft.seo_title || '').trim();
     return !(draft.university_full_name || draft.university_name || '').trim();
   };
 
@@ -650,6 +658,10 @@ function ContentStudioApp() {
       return uName;
     }
 
+    if (isSummaryPageType(activePageType)) {
+      return formData.seo_title || `New ${SCHEMA_DETAILS[activePageType].title}`;
+    }
+
     return 'Untitled Draft';
   };
 
@@ -675,6 +687,10 @@ function ContentStudioApp() {
   useEffect(() => {
     if (!activePageType) {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- clears a stale estimate from the previously active page type
+      setPricingEstimate(null);
+      return;
+    }
+    if (isSummaryPageType(activePageType)) {
       setPricingEstimate(null);
       return;
     }
@@ -1260,6 +1276,49 @@ function ContentStudioApp() {
     });
   };
 
+  // A blog / category summary was written from an uploaded document: open its draft in the editor.
+  const handleSummaryCreated = async (result) => {
+    setShowSummaryUpload(false);
+    await loadDraft(result.draft);
+    refreshDraftsList();
+    const kind = SCHEMA_DETAILS[result.draft.page_type]?.title || 'Page';
+    if (result.existed) toast.info('This document was already summarized - opened the draft made from it.');
+    else if (result.seoError) toast.error(`The summary is written, but the SEO title and description couldn't be (${result.seoError}). Use Regenerate on those two fields.`);
+    else toast.success(`${kind} summary written - check it, then send it on for review.`);
+  };
+
+  // Rewrites one AI field of a blog / category draft from its document. Asks first when the field was
+  // changed by hand since the AI wrote it (generated_values keeps what the AI last wrote).
+  const sameText = (a, b) => String(a || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim() === String(b || '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+  const regenerateSummaryField = (fieldKey, label) => {
+    const run = async () => {
+      setRegeneratingField(fieldKey);
+      try {
+        const { value } = await draftsClient.regenerateSummaryField(activeDraftId, fieldKey);
+        handleFieldChange(fieldKey, value);
+        handleFieldChange('generated_values', { ...(formDataRef.current.generated_values || {}), [fieldKey]: value });
+        toast.success(`${label} rewritten from the document.`);
+        refreshCostSummary();
+      } catch (e) {
+        toast.error(e.message || `Couldn't regenerate the ${label.toLowerCase()}.`);
+      } finally {
+        setRegeneratingField(null);
+      }
+    };
+    const current = formData[fieldKey];
+    const editedByHand = String(current || '').replace(/<[^>]+>/g, '').trim() && !sameText(current, formData.generated_values?.[fieldKey]);
+    if (editedByHand) {
+      setConfirmModal({
+        title: `Replace your edits to the ${label.toLowerCase()}?`,
+        message: 'This field was changed by hand. Regenerating replaces it with new text written from the document.',
+        confirmLabel: 'Regenerate',
+        onConfirm: run
+      });
+    } else {
+      run();
+    }
+  };
+
   // Collapsible toggle
   const toggleSection = (sectionId) => {
     setExpandedSections(prev => ({
@@ -1535,6 +1594,14 @@ function ContentStudioApp() {
 
   // Active schema variables
   const activeSchema = activePageType ? effectiveSchemas[activePageType] : null;
+  // Blog / category pages (config/summaryPages.js): written from their uploaded document, edited with
+  // their own field editors, and rewritten field by field with Regenerate instead of Generate All.
+  const isSummaryPage = isSummaryPageType(activePageType);
+  // Who may press Regenerate right now - the same rule the server applies: the owner while the draft
+  // is with the intern, the senior during senior review, the admin during admin review.
+  const holdsSummaryDraft = isSummaryPage && (draftStatus === 'intern_editing'
+    ? (currentUser.role === 'intern' ? isDraftOwner : (!activeDraftMeta || ownerIdOf(activeDraftMeta) === currentUser.id))
+    : draftStatus === ({ senior: 'senior_review', admin: 'admin_review' })[currentUser.role]);
   // Excludes fields the current viewer can't act on right now (e.g. an Intern's locked AI fields)
   // from both the top progress bar and the sidebar dots below — otherwise "100%"/"complete" never
   // arrives for an Intern who has genuinely finished everything that's theirs to fill in.
@@ -1667,6 +1734,13 @@ function ContentStudioApp() {
             wordpress={wordpressTargets}
             onWordpressRefresh={refreshWordpressTargets}
             onClose={() => setShowFieldSettings(false)}
+          />
+        )}
+        {showSummaryUpload && (
+          <SummaryUploadPanel
+            onClose={() => setShowSummaryUpload(false)}
+            onClosedWhileWorking={() => toast.info('Still writing the summary - the draft will appear in Drafts when it\'s ready.')}
+            onCreated={handleSummaryCreated}
           />
         )}
         {showInvitePanel && (
@@ -1843,8 +1917,8 @@ function ContentStudioApp() {
                 </div>
 
                 {/* Page Type Cards Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                  {Object.values(SCHEMA_DETAILS).map(type => {
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+                  {Object.values(SCHEMA_DETAILS).filter(type => !type.summaryPage).map(type => {
                     const meta = PAGE_TYPE_META[type.id] || {};
                     const Icon = meta.icon || GraduationCap;
                     return (
@@ -1886,6 +1960,39 @@ function ContentStudioApp() {
                       </button>
                     );
                   })}
+                  {/* Blog posts and category pages start from their Word document, not a blank form. */}
+                  <button
+                    type="button"
+                    id="btn-blog-category-summary"
+                    onClick={() => setShowSummaryUpload(true)}
+                    className="group relative flex flex-col text-left p-6 rounded-2xl bg-white border border-border hover:border-orange/40 transition-all duration-300 shadow-premium hover:shadow-premium-hover hover:-translate-y-0.5 cursor-pointer overflow-hidden focus:outline-none focus:ring-2 focus:ring-navy/20"
+                  >
+                    <div className="absolute top-0 left-0 w-full h-1.5 bg-navy group-hover:bg-orange transition-colors duration-300"></div>
+                    <div className="w-11 h-11 rounded-xl bg-navy-soft group-hover:bg-orange-soft flex items-center justify-center mb-4 transition-colors duration-300">
+                      <Newspaper className="w-5 h-5 text-navy group-hover:text-orange transition-colors duration-300" />
+                    </div>
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted mb-1">Upload a Word File</span>
+                    <h3 className="text-lg font-extrabold text-navy group-hover:text-orange transition-colors mb-1.5 uppercase">
+                      Blog / Category Summary
+                    </h3>
+                    <p className="text-xs text-muted leading-relaxed mb-4">
+                      A summary, SEO title and meta description written from the page's document - for a blog post or a category page.
+                    </p>
+                    <div className="mt-auto space-y-2">
+                      <div className="flex justify-between items-center text-xs font-medium border-t border-border pt-3">
+                        <span className="text-muted">Fields Required</span>
+                        <span className="text-navy font-bold">{SCHEMA_DETAILS[PAGE_TYPES.CATEGORY].fieldCount}-{SCHEMA_DETAILS[PAGE_TYPES.BLOG].fieldCount}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs font-medium">
+                        <span className="text-muted">Est. Fill Time</span>
+                        <span className="text-navy font-bold">~{SCHEMA_DETAILS[PAGE_TYPES.BLOG].estimatedTime}</span>
+                      </div>
+                    </div>
+                    <div className="mt-4 flex items-center gap-1.5 text-xs text-orange font-bold uppercase tracking-wide opacity-0 group-hover:opacity-100 group-focus:opacity-100 transition-opacity">
+                      Upload Document
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    </div>
+                  </button>
                 </div>
               </div>
             </div>
@@ -2472,7 +2579,7 @@ function ContentStudioApp() {
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                {draftStatus === 'intern_editing' && isDraftOwner && !hasAnyAiContent && (
+                {draftStatus === 'intern_editing' && isDraftOwner && !hasAnyAiContent && !isSummaryPage && (
                   <>
                     {pricingEstimate && (
                       <span className="text-[10px] text-gray-300 font-medium">
@@ -2495,23 +2602,25 @@ function ContentStudioApp() {
                     "fill required fields" message reads as if the (locked) AI fields are blocking
                     the button, when in practice it's usually an under-filled repeater (e.g. only 1
                     of 2 required Highlights rows) that the Intern can and must still fill in. */}
-                {draftStatus === 'intern_editing' && isDraftOwner && !hasAnyAiContent && !factsValidation.isValid && (
+                {draftStatus === 'intern_editing' && isDraftOwner && !hasAnyAiContent && !isSummaryPage && !factsValidation.isValid && (
                   <span className="text-[10px] text-gray-300 font-medium max-w-xs truncate" title={factsValidation.errors.join('\n')}>
                     Missing: {factsValidation.errors.join(' · ')}
                   </span>
                 )}
 
-                {draftStatus === 'intern_editing' && isDraftOwner && hasAnyAiContent && (
+                {draftStatus === 'intern_editing' && isDraftOwner && (hasAnyAiContent || isSummaryPage) && (
                   <>
-                    <button
-                      type="button"
-                      onClick={() => handleGenerateAllFields(true)}
-                      disabled={isGenerating}
-                      className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 disabled:opacity-50 font-bold text-xs rounded transition-all text-white"
-                    >
-                      <Sparkles className="w-3.5 h-3.5" />
-                      {isGenerating ? 'Generating…' : 'Generate Empty Fields'}
-                    </button>
+                    {!isSummaryPage && (
+                      <button
+                        type="button"
+                        onClick={() => handleGenerateAllFields(true)}
+                        disabled={isGenerating}
+                        className="flex items-center gap-1.5 px-3 py-1.5 border border-white/20 hover:bg-white/10 disabled:opacity-50 font-bold text-xs rounded transition-all text-white"
+                      >
+                        <Sparkles className="w-3.5 h-3.5" />
+                        {isGenerating ? 'Generating…' : 'Generate Empty Fields'}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => openNoteModal('send-to-senior')}
@@ -2524,7 +2633,7 @@ function ContentStudioApp() {
                   </>
                 )}
 
-                {(currentUser.role === 'senior' || currentUser.role === 'admin') && (
+                {(currentUser.role === 'senior' || currentUser.role === 'admin') && !isSummaryPage && (
                   <button
                     type="button"
                     onClick={handleToggleAllowInternAiEdit}
@@ -2547,7 +2656,7 @@ function ContentStudioApp() {
                     Admin both always have full access" permission model elsewhere. University
                     pages don't generate images at all. */}
                 {(currentUser.role === 'senior' || currentUser.role === 'admin') &&
-                  activePageType !== PAGE_TYPES.UNIVERSITY &&
+                  activePageType !== PAGE_TYPES.UNIVERSITY && !isSummaryPage &&
                   (draftStatus === 'admin_review' || draftStatus === 'approved') && (
                   <button
                     type="button"
@@ -2676,16 +2785,19 @@ function ContentStudioApp() {
             </div>
           )}
 
-          {/* A page the document parser handed over: the senior fills it from the original Word file. */}
-          {activeDraftMeta?.source === 'parser' && activeDraftMeta?.source_filename && (
+          {/* The Word document a draft was made from - one the document parser handed over, or one
+              uploaded for a blog / category summary - kept with the draft to work from. */}
+          {activeDraftMeta?.has_source_document && (
             <div className="mx-6 mt-3 flex items-center gap-3 rounded-lg border border-navy/10 bg-white px-4 py-2.5 text-sm" id="source-document-bar">
               <FileText className="w-4 h-4 text-navy/60 shrink-0" />
               <span className="text-navy/80 truncate">
-                Imported from <span className="font-semibold text-navy">{activeDraftMeta.source_filename}</span> - check the fields against it and fill what is missing.
+                {activeDraftMeta.source === 'parser'
+                  ? <>Imported from <span className="font-semibold text-navy">{activeDraftMeta.source_filename}</span> - check the fields against it and fill what is missing.</>
+                  : <>Written from <span className="font-semibold text-navy">{activeDraftMeta.source_filename || 'the uploaded document'}</span> - check the summary and SEO fields against it.</>}
               </span>
               <a
                 href={`/api/drafts/${activeDraftMeta.id}/source-document`}
-                download={activeDraftMeta.source_filename}
+                download={activeDraftMeta.source_filename || 'document.docx'}
                 className="ml-auto inline-flex items-center gap-1.5 rounded-md bg-navy px-3 py-1.5 text-xs font-semibold text-white hover:bg-navy/90 shrink-0"
                 id="btn-download-source-document"
               >
@@ -2777,6 +2889,32 @@ function ContentStudioApp() {
                   const locked = !canEditField(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner });
                   const lockReason = locked ? getLockReason(field, { role: currentUser.role, draftStatus, allowInternAiEdit, isDraftOwner }) : null;
 
+                  if (isSummaryPage && ['complete_page_summary', 'seo_title', 'meta_description', 'reading_time'].includes(key)) {
+                    const regenerate = !locked && holdsSummaryDraft && SUMMARY_AI_FIELDS.includes(key) && activeDraftMeta?.has_source_document !== false
+                      ? { onClick: () => regenerateSummaryField(key, field.label), busy: regeneratingField === key }
+                      : null;
+                    const common = { field, value, onChange: (val) => handleFieldChange(key, val), disabled: locked, lockReason, error: isInvalid ? `${field.label} is required` : null };
+                    return (
+                      <div key={key} id={`field-container-${key}`}>
+                        {key === 'complete_page_summary' && <SummaryField {...common} regenerate={regenerate} pasteFieldNames={pasteFieldNames} />}
+                        {key === 'seo_title' && <SeoField {...common} regenerate={regenerate} />}
+                        {key === 'meta_description' && (
+                          <>
+                            <SeoField {...common} regenerate={regenerate} multiline />
+                            <div className="mt-4"><SerpPreview pageType={activePageType} title={formData.seo_title} description={formData.meta_description} /></div>
+                          </>
+                        )}
+                        {key === 'reading_time' && <ReadingTimeField {...common} />}
+                        <FieldTags
+                          className="mt-1.5"
+                          target={wordpressTargets?.targets?.[activePageType]?.[key]}
+                          checkedLive={!!wordpressTargets?.checkedLive?.[activePageType]}
+                          aiGenerated={!!field.aiAssist}
+                        />
+                      </div>
+                    );
+                  }
+
                   return (
                     <div key={key} id={`field-container-${key}`}>
                       {field.type === 'TEXT_INPUT' && (
@@ -2859,7 +2997,7 @@ function ContentStudioApp() {
                         aiGenerated={!!field.aiAssist}
                       />
 
-                      {field.aiAssist && (
+                      {field.aiAssist && !isSummaryPage && (
                         (currentUser.role === 'senior' && draftStatus === 'senior_review') ||
                         (currentUser.role === 'admin' && draftStatus === 'admin_review')
                       ) && (
@@ -2927,7 +3065,7 @@ function ContentStudioApp() {
                         {/* Dynamic Field Renderer — short TEXT_INPUT runs pack into a grid,
                             long-form fields (textarea/rich text/repeater) stay full-width */}
                         <div className="space-y-4">
-                          {groupFieldsForLayout(sec.fields).map((group, gi) => (
+                          {(isSummaryPage ? sec.fields.map(f => ({ type: 'single', fields: [f] })) : groupFieldsForLayout(sec.fields)).map((group, gi) => (
                             group.type === 'grid' ? (
                               <div key={gi} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-4">
                                 {group.fields.map(field => renderField(field))}
