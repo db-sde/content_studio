@@ -15,6 +15,7 @@
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
+import { listPublishedPages } from './wordpressClient.js';
 
 const SYNCED_PAGE_TYPES = ['university', 'course', 'specialization'];
 const PATH = '/api/catalog/sync';
@@ -80,12 +81,13 @@ export function buildSyncPayload({ pageType, postId, link, acf, linkedIds = {}, 
 }
 
 // Queues a page just published to WordPress. Returns { status: 'queued' | 'skipped' | 'off', reason? }.
-// Never throws - the publish already succeeded and must stay a success.
-export async function queueChatbotSync({ draftId, pageType, published }) {
+// Never throws - the publish already succeeded and must stay a success. `drain: false` leaves the
+// sending to the caller (a resend of the whole catalog queues everything first).
+export async function queueChatbotSync({ draftId, pageType, published }, { drain = true } = {}) {
   if (!SYNCED_PAGE_TYPES.includes(pageType)) return { status: 'skipped', reason: 'the chatbot only takes university, course and specialization pages' };
   if (!chatbotSyncConfigured()) return { status: 'off' };
   try {
-    const built = buildSyncPayload({ pageType, postId: published.id, link: published.link, acf: published.acf, linkedIds: published.linkedIds });
+    const built = buildSyncPayload({ pageType, postId: published.id, link: published.link, acf: published.acf, linkedIds: published.linkedIds, ...(published.modified ? { modified: published.modified } : {}) });
     if (built.skip) return { status: 'skipped', reason: built.skip };
     const db = await getDb();
     const site = config.wordpress.siteUrl;
@@ -101,7 +103,7 @@ export async function queueChatbotSync({ draftId, pageType, published }) {
       INSERT INTO chatbot_sync_events (event_id, draft_id, page_type, wp_site, wp_post_id, version, body)
       VALUES ($1, $2, $3, $4, $5, $6, $7)
     `, [crypto.randomUUID(), draftId, pageType, site, postId, version, JSON.stringify(built.payload)]);
-    drainChatbotQueue().catch(e => console.warn('[chatbot] send failed:', e.message));
+    if (drain) drainChatbotQueue().catch(e => console.warn('[chatbot] send failed:', e.message));
     return { status: 'queued' };
   } catch (e) {
     console.error('[chatbot] couldn\'t queue the page:', e.message);
@@ -132,29 +134,37 @@ export function drainChatbotQueue() {
   if (draining) return draining;
   draining = (async () => {
     const db = await getDb();
-    const { rows } = await db.query(
-      "SELECT * FROM chatbot_sync_events WHERE status = 'queued' AND next_attempt_at <= $1 ORDER BY id LIMIT 25",
-      [isoNow()]
-    );
-    for (const row of rows) {
-      let outcome;
-      try {
-        outcome = await send(row);
-      } catch (e) {
-        outcome = { status: 0, detail: e.name === 'TimeoutError' ? 'no answer in time' : e.message };
-      }
-      const attempts = row.attempts + 1;
-      if (outcome.status >= 200 && outcome.status < 300) {
-        await db.query("UPDATE chatbot_sync_events SET status = 'sent', attempts = $2, last_error = NULL, updated_at = iso_now() WHERE id = $1 AND status = 'queued'", [row.id, attempts]);
-        continue;
-      }
-      const error = `${outcome.status || 'no response'}${outcome.detail ? `: ${String(outcome.detail).slice(0, 300)}` : ''}`;
-      const giveUp = PERMANENT.has(outcome.status) || attempts > RETRY_DELAYS_MS.length;
-      await db.query(
-        "UPDATE chatbot_sync_events SET status = $2, attempts = $3, last_error = $4, next_attempt_at = $5, updated_at = iso_now() WHERE id = $1 AND status = 'queued'",
-        [row.id, giveUp ? 'failed' : 'queued', attempts, error, isoAfter(giveUp ? 0 : RETRY_DELAYS_MS[attempts - 1])]
+    // In batches of 25 until nothing is due (a resend queues the whole catalog at once). A page that
+    // fails is due again only later, so this always ends.
+    for (;;) {
+      const { rows } = await db.query(
+        "SELECT * FROM chatbot_sync_events WHERE status = 'queued' AND next_attempt_at <= $1 ORDER BY id LIMIT 25",
+        [isoNow()]
       );
-      if (giveUp) console.error(`[chatbot] gave up on ${row.page_type} ${row.wp_post_id} (event ${row.event_id}): ${error}`);
+      for (const row of rows) {
+        let outcome;
+        try {
+          outcome = await send(row);
+        } catch (e) {
+          outcome = { status: 0, detail: e.name === 'TimeoutError' ? 'no answer in time' : e.message };
+        }
+        const attempts = row.attempts + 1;
+        if (outcome.status >= 200 && outcome.status < 300) {
+          await db.query("UPDATE chatbot_sync_events SET status = 'sent', attempts = $2, last_error = NULL, updated_at = iso_now() WHERE id = $1 AND status = 'queued'", [row.id, attempts]);
+          continue;
+        }
+        const error = `${outcome.status || 'no response'}${outcome.detail ? `: ${String(outcome.detail).slice(0, 300)}` : ''}`;
+        const giveUp = PERMANENT.has(outcome.status) || attempts > RETRY_DELAYS_MS.length;
+        await db.query(
+          "UPDATE chatbot_sync_events SET status = $2, attempts = $3, last_error = $4, next_attempt_at = $5, updated_at = iso_now() WHERE id = $1 AND status = 'queued'",
+          [row.id, giveUp ? 'failed' : 'queued', attempts, error, isoAfter(giveUp ? 0 : RETRY_DELAYS_MS[attempts - 1])]
+        );
+        if (giveUp) console.error(`[chatbot] gave up on ${row.page_type} ${row.wp_post_id} (event ${row.event_id}): ${error}`);
+        // Unreachable or broken (not a refusal of this one page): the rest would only wait out the
+        // same timeout one by one. They stay due, and the next check (every minute) tries again.
+        if (outcome.status === 0 || outcome.status >= 500) return;
+      }
+      if (rows.length < 25) break;
     }
   })().finally(() => { draining = null; });
   return draining;
@@ -167,4 +177,70 @@ export function startChatbotSyncLoop(intervalMs = 60000) {
   timer.unref?.();
   drainChatbotQueue().catch(() => {});
   return timer;
+}
+
+// The chatbot keeps its catalog only in memory, so a restart (Render restarts idle services) takes it
+// back to its bundled sample. This resends every published university, course and specialization page
+// on WordPress - universities first, so courses find their university - from the Admin's Chatbot panel.
+// Pages made by hand in WordPress go too. Returns { queued: { university, course, specialization },
+// skipped: [{ pageType, id, reason }] }; sending carries on in the background.
+let resending = null;
+export async function resendAllToChatbot() {
+  if (!chatbotSyncConfigured()) {
+    const err = new Error('The chatbot sync is off - set CHATBOT_BASE_URL and CHATBOT_CATALOG_WEBHOOK_SECRET on the server.');
+    err.status = 409;
+    throw err;
+  }
+  if (resending) {
+    const err = new Error('A resend is already running - wait for it to finish.');
+    err.status = 409;
+    throw err;
+  }
+  resending = (async () => {
+    const queued = {}, skipped = [];
+    for (const pageType of SYNCED_PAGE_TYPES) {
+      const pages = await listPublishedPages(pageType);
+      queued[pageType] = 0;
+      for (const page of pages) {
+        const result = await queueChatbotSync({ draftId: null, pageType, published: page }, { drain: false });
+        if (result.status === 'queued') queued[pageType]++;
+        else skipped.push({ pageType, id: page.id, reason: result.reason || result.status });
+      }
+    }
+    drainChatbotQueue().catch(e => console.warn('[chatbot] send failed:', e.message));
+    return { queued, skipped };
+  })().finally(() => { resending = null; });
+  return resending;
+}
+
+// For the Admin's Chatbot panel: what's waiting, sent and failed, and what the chatbot itself reports
+// (its /health; null while it's asleep or unreachable - it wakes on the next send).
+export async function chatbotSyncStatus() {
+  if (!chatbotSyncConfigured()) return { configured: false };
+  const db = await getDb();
+  const [{ rows: counts }, { rows: lastSent }, { rows: failures }] = await Promise.all([
+    db.query('SELECT status, COUNT(*)::int AS n FROM chatbot_sync_events GROUP BY status'),
+    db.query("SELECT MAX(updated_at) AS at FROM chatbot_sync_events WHERE status = 'sent'"),
+    db.query("SELECT page_type, wp_post_id, last_error, updated_at FROM chatbot_sync_events WHERE status = 'failed' OR (status = 'queued' AND attempts > 0) ORDER BY updated_at DESC LIMIT 5")
+  ]);
+  const byStatus = Object.fromEntries(counts.map(r => [r.status, Number(r.n)]));
+  let chatbot = null;
+  try {
+    const res = await fetch(`${config.chatbot.baseUrl.replace(/\/+$/, '')}/health`, { signal: AbortSignal.timeout(8000) });
+    if (res.ok) {
+      const h = await res.json();
+      chatbot = { status: h.status || null, pages: Number.isFinite(h.catalog_entity_count) ? h.catalog_entity_count : null, lastUpdated: h.catalog_last_updated || null };
+    }
+  } catch { /* asleep or down */ }
+  return {
+    configured: true,
+    chatbotUrl: config.chatbot.baseUrl,
+    waiting: byStatus.queued || 0,
+    sent: byStatus.sent || 0,
+    failed: byStatus.failed || 0,
+    lastSentAt: lastSent[0]?.at || null,
+    problems: failures.map(r => ({ pageType: r.page_type, postId: r.wp_post_id, error: r.last_error, at: r.updated_at })),
+    resending: !!resending,
+    chatbot
+  };
 }

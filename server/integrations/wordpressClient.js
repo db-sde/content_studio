@@ -369,3 +369,35 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
   // acf and linkedIds: what WordPress now holds, for the chatbot's copy (see chatbotSync.js).
   return { id: post.id, link: post.link, status: post.status, skipped, recreated, acf, linkedIds: linked.ids };
 }
+
+// Every published page of one type, as the chatbot's copy needs it: { id, link, modified, acf,
+// linkedIds }. For resending the whole catalog to the chatbot (chatbotSync.js), so it includes pages
+// made by hand in WordPress, not only ones published from here. 100 per request, newest first.
+export async function listPublishedPages(pageType) {
+  assertWordpressConfigured();
+  const slug = postTypeSlug(pageType);
+  const idOf = (v) => {
+    const one = Array.isArray(v) ? v[0] : v;
+    const id = one && typeof one === 'object' ? one.ID ?? one.id : one;
+    return Number(id) > 0 ? Number(id) : null;
+  };
+  const pages = [];
+  for (let page = 1; page <= 50; page++) {
+    let batch;
+    try {
+      batch = await wpRequest('GET', `${slug}?status=publish&per_page=100&page=${page}&orderby=id&order=asc&_fields=id,link,modified_gmt,acf`, { slug });
+    } catch (e) {
+      if (e.code === 'rest_post_invalid_page_number') break; // past the last page
+      throw e;
+    }
+    if (!Array.isArray(batch)) break;
+    for (const post of batch) {
+      const acf = post.acf && typeof post.acf === 'object' && !Array.isArray(post.acf) ? post.acf : {};
+      const linkedIds = {};
+      for (const key of Object.keys(LINKED_FIELDS[pageType] || {})) if (idOf(acf[key])) linkedIds[key] = idOf(acf[key]);
+      pages.push({ id: post.id, link: post.link, modified: post.modified_gmt ? `${post.modified_gmt.replace(/\.\d+$/, '')}Z` : undefined, acf, linkedIds });
+    }
+    if (batch.length < 100) break;
+  }
+  return pages;
+}

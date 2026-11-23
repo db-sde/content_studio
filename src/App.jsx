@@ -26,6 +26,7 @@ import {
 import { AiFieldToolbar } from './components/AiFieldToolbar';
 import { AssignInternMenu } from './components/AssignInternMenu';
 import { InvitePanel } from './components/InvitePanel';
+import { ChatbotPanel } from './components/ChatbotPanel';
 import { FieldTags } from './components/FieldTags';
 import { FieldSettingsPanel } from './screens/FieldSettingsPanel';
 import { buildEffectiveSchemas, withCustomFields, aiFieldsOf, aiFactsOf, aiOutputFormatOf, fieldsOutOfInternReach } from './config/fieldSettings';
@@ -279,6 +280,7 @@ function ContentStudioApp() {
 
   // Local UI States
   const [showInvitePanel, setShowInvitePanel] = useState(false);
+  const [showChatbotPanel, setShowChatbotPanel] = useState(false);
   // Blog / Category Summary: the upload panel, and which field is being rewritten right now.
   const [showSummaryUpload, setShowSummaryUpload] = useState(false);
   const [regeneratingField, setRegeneratingField] = useState(null);
@@ -1704,6 +1706,15 @@ function ContentStudioApp() {
                   Field Settings
                 </button>
               )}
+              {currentUser?.role === 'admin' && (
+                <button
+                  type="button"
+                  onClick={() => { setShowChatbotPanel(true); setShowUserMenu(false); }}
+                  className="w-full text-left px-3.5 py-2 text-navy hover:bg-off transition-colors"
+                >
+                  Chatbot Sync
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => { setShowActivity(true); setShowUserMenu(false); }}
@@ -1745,6 +1756,9 @@ function ContentStudioApp() {
             onClosedWhileWorking={() => toast.info('Still writing the summary - the draft will appear in Drafts when it\'s ready.')}
             onCreated={handleSummaryCreated}
           />
+        )}
+        {showChatbotPanel && currentUser?.role === 'admin' && (
+          <ChatbotPanel onClose={() => setShowChatbotPanel(false)} />
         )}
         {showInvitePanel && (
           <InvitePanel role={currentUser?.role} onClose={() => setShowInvitePanel(false)} />

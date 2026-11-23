@@ -56,6 +56,8 @@ test('fields WordPress holds in a shape the chatbot refuses are converted, not s
 let t, admin, chatbot, wpServer;
 const received = [];
 let answers = []; // statuses for the next requests, in order; then 200
+let wpPublished = {}; // what WordPress lists as published, per post type
+const wpListRequests = [];
 
 before(async () => {
   // The chatbot's endpoint: 401 for a wrong secret, 422 without the required fields, else an upsert.
@@ -69,6 +71,7 @@ before(async () => {
     const status = answers.shift() ?? 200;
     res.status(status).json(status === 200 ? { action: 'created', post_id: String(b.post_id) } : { detail: `refused (${status})` });
   });
+  bot.get('/health', (req, res) => res.json({ status: 'ok', catalog_entity_count: 157 + received.filter(r => r.secretOk).length, catalog_last_updated: '2026-11-23T10:00:00Z' }));
   chatbot = await new Promise(resolve => { const s = bot.listen(0, '127.0.0.1', () => resolve(s)); });
 
   // WordPress, for publishes through the route.
@@ -77,9 +80,17 @@ before(async () => {
   const wp = express();
   wp.use(express.json());
   wp.use((req, res) => {
-    const m = /^\/wp-json\/wp\/v2\/(university|posts)(?:\/(\d+))?$/.exec(req.path);
+    const m = /^\/wp-json\/wp\/v2\/(university|course|specialization|posts)(?:\/(\d+))?$/.exec(req.path);
     if (!m) return res.status(404).json({ code: 'rest_no_route' });
     if (req.method === 'OPTIONS') return res.json({ schema: { properties: { acf: schema } } });
+    if (req.method === 'GET' && !m[2]) {
+      // The published pages of a type, 100 a page, like WordPress (past the last page: a 400).
+      wpListRequests.push(req.originalUrl);
+      const all = wpPublished[m[1]] || [];
+      const page = Number(req.query.page || 1), per = Number(req.query.per_page || 10);
+      if (page > 1 && (page - 1) * per >= all.length) return res.status(400).json({ code: 'rest_post_invalid_page_number' });
+      return res.json(all.slice((page - 1) * per, page * per));
+    }
     if (req.method === 'GET' && m[2]) return res.json({ id: Number(m[2]), status: 'publish' });
     if (req.method === 'POST') { const id = 300 + posts.size; posts.set(id, { id }); return res.status(201).json({ id, status: 'draft' }); }
     if (req.method === 'PUT') return res.json({ id: Number(m[2]), status: 'publish', link: `https://staging.degreebaba.com/${m[1]}/page-${m[2]}/` });
@@ -193,4 +204,68 @@ test('publishing through the app queues the page and reports it; the publish nev
   const [waiting] = await events();
   assert.equal(waiting.status, 'queued');
   assert.equal(waiting.attempts, 1);
+});
+
+// ---------------------------------------------------------------- resending everything
+const wpPage = (type, id, acf, extra = {}) => ({ id, link: `https://staging.degreebaba.com/${type}/${type}-${id}/`, modified_gmt: '2026-11-20T08:30:00', acf, ...extra });
+
+test('an Admin can resend every published page - universities first, hand-made pages too', async () => {
+  wpPublished = {
+    university: Array.from({ length: 130 }, (_, i) => wpPage('university', 1000 + i, { university_name: `Uni ${i}`, nirf_rank: '#7' })),
+    course: [wpPage('course', 2000, { program_name: 'Online MBA', linked_university: [1000] }), wpPage('course', 2001, { program_name: 'Online BBA', linked_university: '' })],
+    specialization: [wpPage('specialization', 3000, { specialization_name: 'Finance', linked_university: 1000, linked_course: { ID: 2000 } }), wpPage('specialization', 3001, { specialization_name: 'HR' }, { link: 'https://staging.degreebaba.com/?p=3001' })]
+  };
+  wpListRequests.length = 0;
+  const intern = await t.createUser('Intern Resend', 'intern');
+  const senior = await t.createUser('Senior Resend', 'senior');
+  for (const who of [intern, senior]) {
+    assert.equal((await t.api(who, 'POST', '/api/chatbot/resend')).status, 403);
+    assert.equal((await t.api(who, 'GET', '/api/chatbot/status')).status, 403);
+  }
+
+  const r = await t.api(admin, 'POST', '/api/chatbot/resend');
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.deepEqual(r.body.queued, { university: 130, course: 2, specialization: 1 });
+  assert.deepEqual(r.body.skipped, [{ pageType: 'specialization', id: 3001, reason: 'the page has no public address yet' }]);
+  assert.equal(wpListRequests.filter(u => u.includes('/university?')).length, 2, '130 universities: two pages of 100');
+
+  await drainChatbotQueue();
+  const rows = await events();
+  assert.equal(rows.length, 133);
+  assert.ok(rows.every(e => e.status === 'sent'), 'one drain sends them all, past the batch of 25');
+  assert.deepEqual([...new Set(received.map(x => x.body.post_type))], ['university', 'course', 'specialization'], 'universities go first');
+  const byId = Object.fromEntries(received.map(x => [x.body.post_id, x.body]));
+  assert.equal(byId[1000].nirf_rank, undefined);
+  assert.equal(byId[1000].acf.nirf_rank, 7);
+  assert.equal(byId[1000].modified, '2026-11-20T08:30:00Z');
+  assert.equal(byId[2000].acf.linked_university, 1000);
+  assert.equal(byId[2001].acf.linked_university, '', 'no link: left as WordPress has it');
+  assert.deepEqual([byId[3000].acf.linked_university, byId[3000].acf.linked_course], [1000, 2000]);
+
+  const status = await t.api(admin, 'GET', '/api/chatbot/status');
+  assert.equal(status.status, 200);
+  assert.equal(status.body.configured, true);
+  assert.equal(status.body.sent, 133);
+  assert.equal(status.body.waiting, 0);
+  assert.equal(status.body.chatbot.pages, 157 + 133);
+  wpPublished = {};
+});
+
+test('when the chatbot doesn\'t answer, the rest wait for the next check instead of each timing out', async () => {
+  Object.assign(config.chatbot, { baseUrl: 'http://127.0.0.1:9' });
+  for (const id of [201, 202, 203]) await queueChatbotSync({ draftId: 'd', pageType: 'university', published: published(id) }, { drain: false });
+  await drainChatbotQueue();
+  assert.deepEqual((await events()).map(e => [e.status, e.attempts]), [['queued', 1], ['queued', 0], ['queued', 0]]);
+  const status = await t.api(admin, 'GET', '/api/chatbot/status');
+  assert.equal(status.body.chatbot, null, 'unreachable');
+  assert.equal(status.body.waiting, 3);
+  assert.equal(status.body.problems.length, 1);
+});
+
+test('the resend says plainly when the sync is off', async () => {
+  Object.assign(config.chatbot, { baseUrl: '', webhookSecret: '' });
+  const r = await t.api(admin, 'POST', '/api/chatbot/resend');
+  assert.equal(r.status, 409);
+  assert.match(r.body.error, /CHATBOT_BASE_URL/);
+  assert.deepEqual((await t.api(admin, 'GET', '/api/chatbot/status')).body, { configured: false });
 });

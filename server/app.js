@@ -11,6 +11,7 @@ import { costsRouter } from './routes/costs.js';
 import { directoryRouter } from './routes/directory.js';
 import { fieldSettingsRouter } from './routes/fieldSettings.js';
 import { imagePipelineRouter } from './routes/imagePipeline.js';
+import { chatbotRouter } from './routes/chatbot.js';
 import { importParserDraft } from './routes/parserImport.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { requireAuth } from './middleware/auth.js';
@@ -56,6 +57,7 @@ export function createApp() {
   app.use('/api/directory', ...authed, directoryRouter);
   app.use('/api/field-settings', ...authed, fieldSettingsRouter);
   app.use('/api/image-pipeline', ...authed, imagePipelineRouter);
+  app.use('/api/chatbot', ...authed, chatbotRouter);
 
   app.use(errorHandler);
 
