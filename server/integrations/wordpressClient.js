@@ -401,3 +401,27 @@ export async function listPublishedPages(pageType) {
   }
   return pages;
 }
+
+// Pages of one type that are no longer live - in Trash, back to draft, or pending review - so the
+// chatbot can drop its copy (chatbotSync.js resendAllToChatbot). The three statuses the chatbot
+// takes as "not published". { id, slug, status, modified } each.
+export async function listUnpublishedPages(pageType) {
+  assertWordpressConfigured();
+  const slug = postTypeSlug(pageType);
+  const pages = [];
+  for (let page = 1; page <= 50; page++) {
+    let batch;
+    try {
+      batch = await wpRequest('GET', `${slug}?status=trash,draft,pending&per_page=100&page=${page}&orderby=id&order=asc&context=edit&_fields=id,slug,status,modified_gmt`, { slug });
+    } catch (e) {
+      if (e.code === 'rest_post_invalid_page_number') break;
+      throw e;
+    }
+    if (!Array.isArray(batch)) break;
+    for (const post of batch) {
+      pages.push({ id: post.id, slug: post.slug || String(post.id), status: post.status, modified: post.modified_gmt ? `${post.modified_gmt.replace(/\.\d+$/, '')}Z` : undefined });
+    }
+    if (batch.length < 100) break;
+  }
+  return pages;
+}

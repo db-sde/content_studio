@@ -15,7 +15,7 @@
 import crypto from 'node:crypto';
 import { config } from '../config.js';
 import { getDb } from '../db/index.js';
-import { listPublishedPages } from './wordpressClient.js';
+import { listPublishedPages, listUnpublishedPages } from './wordpressClient.js';
 
 const SYNCED_PAGE_TYPES = ['university', 'course', 'specialization'];
 const PATH = '/api/catalog/sync';
@@ -80,6 +80,27 @@ export function buildSyncPayload({ pageType, postId, link, acf, linkedIds = {}, 
   };
 }
 
+// The chatbot's payload for a page that's no longer live: it drops its copy (or does nothing if it
+// never had one). It still checks the shape, so slug/modified/acf are filled.
+export function buildRemovalPayload({ pageType, postId, slug, status, modified = isoNow() }) {
+  return { post_id: Number(postId), post_type: pageType, status, slug: String(slug || postId), modified, acf: {} };
+}
+
+async function insertEvent(db, { draftId, pageType, postId, payload }) {
+  const site = config.wordpress.siteUrl;
+  // This send replaces anything still waiting for the same page.
+  await db.query(
+    "UPDATE chatbot_sync_events SET status = 'superseded', updated_at = iso_now() WHERE wp_site = $1 AND page_type = $2 AND wp_post_id = $3 AND status = 'queued'",
+    [site, pageType, postId]
+  );
+  const { rows } = await db.query('SELECT MAX(version) AS v FROM chatbot_sync_events WHERE wp_site = $1 AND page_type = $2 AND wp_post_id = $3', [site, pageType, postId]);
+  const version = Math.max(Date.now(), Number(rows[0]?.v || 0) + 1);
+  await db.query(`
+    INSERT INTO chatbot_sync_events (event_id, draft_id, page_type, wp_site, wp_post_id, version, body)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+  `, [crypto.randomUUID(), draftId, pageType, site, postId, version, JSON.stringify(payload)]);
+}
+
 // Queues a page just published to WordPress. Returns { status: 'queued' | 'skipped' | 'off', reason? }.
 // Never throws - the publish already succeeded and must stay a success. `drain: false` leaves the
 // sending to the caller (a resend of the whole catalog queues everything first).
@@ -89,20 +110,7 @@ export async function queueChatbotSync({ draftId, pageType, published }, { drain
   try {
     const built = buildSyncPayload({ pageType, postId: published.id, link: published.link, acf: published.acf, linkedIds: published.linkedIds, ...(published.modified ? { modified: published.modified } : {}) });
     if (built.skip) return { status: 'skipped', reason: built.skip };
-    const db = await getDb();
-    const site = config.wordpress.siteUrl;
-    const postId = String(published.id);
-    // This publish replaces anything still waiting for the same page.
-    await db.query(
-      "UPDATE chatbot_sync_events SET status = 'superseded', updated_at = iso_now() WHERE wp_site = $1 AND page_type = $2 AND wp_post_id = $3 AND status = 'queued'",
-      [site, pageType, postId]
-    );
-    const { rows } = await db.query('SELECT MAX(version) AS v FROM chatbot_sync_events WHERE wp_site = $1 AND page_type = $2 AND wp_post_id = $3', [site, pageType, postId]);
-    const version = Math.max(Date.now(), Number(rows[0]?.v || 0) + 1);
-    await db.query(`
-      INSERT INTO chatbot_sync_events (event_id, draft_id, page_type, wp_site, wp_post_id, version, body)
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
-    `, [crypto.randomUUID(), draftId, pageType, site, postId, version, JSON.stringify(built.payload)]);
+    await insertEvent(await getDb(), { draftId, pageType, postId: String(published.id), payload: built.payload });
     if (drain) drainChatbotQueue().catch(e => console.warn('[chatbot] send failed:', e.message));
     return { status: 'queued' };
   } catch (e) {
@@ -182,7 +190,8 @@ export function startChatbotSyncLoop(intervalMs = 60000) {
 // The chatbot keeps its catalog only in memory, so a restart (Render restarts idle services) takes it
 // back to its bundled sample. This resends every published university, course and specialization page
 // on WordPress - universities first, so courses find their university - from the Admin's Chatbot panel.
-// Pages made by hand in WordPress go too. Returns { queued: { university, course, specialization },
+// Pages made by hand in WordPress go too. Pages taken down (Trash, draft, pending) are sent as such, so
+// the chatbot drops its copy. Returns { queued: { university, course, specialization }, removed,
 // skipped: [{ pageType, id, reason }] }; sending carries on in the background.
 let resending = null;
 export async function resendAllToChatbot() {
@@ -198,6 +207,7 @@ export async function resendAllToChatbot() {
   }
   resending = (async () => {
     const queued = {}, skipped = [];
+    let removed = 0;
     for (const pageType of SYNCED_PAGE_TYPES) {
       const pages = await listPublishedPages(pageType);
       queued[pageType] = 0;
@@ -207,8 +217,15 @@ export async function resendAllToChatbot() {
         else skipped.push({ pageType, id: page.id, reason: result.reason || result.status });
       }
     }
+    const db = await getDb();
+    for (const pageType of SYNCED_PAGE_TYPES) {
+      for (const page of await listUnpublishedPages(pageType)) {
+        await insertEvent(db, { draftId: null, pageType, postId: String(page.id), payload: buildRemovalPayload({ pageType, postId: page.id, slug: page.slug, status: page.status, modified: page.modified }) });
+        removed++;
+      }
+    }
     drainChatbotQueue().catch(e => console.warn('[chatbot] send failed:', e.message));
-    return { queued, skipped };
+    return { queued, removed, skipped };
   })().finally(() => { resending = null; });
   return resending;
 }

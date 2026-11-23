@@ -57,6 +57,7 @@ let t, admin, chatbot, wpServer;
 const received = [];
 let answers = []; // statuses for the next requests, in order; then 200
 let wpPublished = {}; // what WordPress lists as published, per post type
+let wpUnpublished = {}; // ...and in Trash / draft / pending
 const wpListRequests = [];
 
 before(async () => {
@@ -86,7 +87,7 @@ before(async () => {
     if (req.method === 'GET' && !m[2]) {
       // The published pages of a type, 100 a page, like WordPress (past the last page: a 400).
       wpListRequests.push(req.originalUrl);
-      const all = wpPublished[m[1]] || [];
+      const all = (req.query.status === 'publish' ? wpPublished : wpUnpublished)[m[1]] || [];
       const page = Number(req.query.page || 1), per = Number(req.query.per_page || 10);
       if (page > 1 && (page - 1) * per >= all.length) return res.status(400).json({ code: 'rest_post_invalid_page_number' });
       return res.json(all.slice((page - 1) * per, page * per));
@@ -215,6 +216,7 @@ test('an Admin can resend every published page - universities first, hand-made p
     course: [wpPage('course', 2000, { program_name: 'Online MBA', linked_university: [1000] }), wpPage('course', 2001, { program_name: 'Online BBA', linked_university: '' })],
     specialization: [wpPage('specialization', 3000, { specialization_name: 'Finance', linked_university: 1000, linked_course: { ID: 2000 } }), wpPage('specialization', 3001, { specialization_name: 'HR' }, { link: 'https://staging.degreebaba.com/?p=3001' })]
   };
+  wpUnpublished = { specialization: [{ id: 3002, slug: 'finance-2__trashed', status: 'trash', modified_gmt: '2026-11-23T09:00:00' }], course: [{ id: 2002, slug: 'old-course', status: 'draft', modified_gmt: '2026-11-22T09:00:00' }] };
   wpListRequests.length = 0;
   const intern = await t.createUser('Intern Resend', 'intern');
   const senior = await t.createUser('Senior Resend', 'senior');
@@ -226,14 +228,21 @@ test('an Admin can resend every published page - universities first, hand-made p
   const r = await t.api(admin, 'POST', '/api/chatbot/resend');
   assert.equal(r.status, 200, JSON.stringify(r.body));
   assert.deepEqual(r.body.queued, { university: 130, course: 2, specialization: 1 });
+  assert.equal(r.body.removed, 2);
   assert.deepEqual(r.body.skipped, [{ pageType: 'specialization', id: 3001, reason: 'the page has no public address yet' }]);
-  assert.equal(wpListRequests.filter(u => u.includes('/university?')).length, 2, '130 universities: two pages of 100');
+  assert.equal(wpListRequests.filter(u => u.includes('/university?status=publish')).length, 2, '130 universities: two pages of 100');
 
   await drainChatbotQueue();
   const rows = await events();
-  assert.equal(rows.length, 133);
+  assert.equal(rows.length, 135);
   assert.ok(rows.every(e => e.status === 'sent'), 'one drain sends them all, past the batch of 25');
-  assert.deepEqual([...new Set(received.map(x => x.body.post_type))], ['university', 'course', 'specialization'], 'universities go first');
+  const live = received.filter(x => x.body.status === 'publish');
+  assert.deepEqual([...new Set(live.map(x => x.body.post_type))], ['university', 'course', 'specialization'], 'universities go first');
+  // Pages taken down go last, as "not published" - the chatbot drops its copy.
+  assert.deepEqual(received.slice(-2).map(x => x.body), [
+    { post_id: 2002, post_type: 'course', status: 'draft', slug: 'old-course', modified: '2026-11-22T09:00:00Z', acf: {} },
+    { post_id: 3002, post_type: 'specialization', status: 'trash', slug: 'finance-2__trashed', modified: '2026-11-23T09:00:00Z', acf: {} }
+  ]);
   const byId = Object.fromEntries(received.map(x => [x.body.post_id, x.body]));
   assert.equal(byId[1000].nirf_rank, undefined);
   assert.equal(byId[1000].acf.nirf_rank, 7);
@@ -245,10 +254,11 @@ test('an Admin can resend every published page - universities first, hand-made p
   const status = await t.api(admin, 'GET', '/api/chatbot/status');
   assert.equal(status.status, 200);
   assert.equal(status.body.configured, true);
-  assert.equal(status.body.sent, 133);
+  assert.equal(status.body.sent, 135);
   assert.equal(status.body.waiting, 0);
-  assert.equal(status.body.chatbot.pages, 157 + 133);
+  assert.equal(status.body.chatbot.pages, 157 + 135);
   wpPublished = {};
+  wpUnpublished = {};
 });
 
 test('when the chatbot doesn\'t answer, the rest wait for the next check instead of each timing out', async () => {

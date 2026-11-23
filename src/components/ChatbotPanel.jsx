@@ -97,7 +97,7 @@ export const ChatbotPanel = ({ onClose }) => {
 
       {result && (
         <p className="text-xs text-navy mt-2">
-          Queued {total} pages ({Object.entries(result.queued).map(([type, n]) => countOf(n, type)).join(', ')}). They reach the chatbot over the next minute or two.
+          Queued {total} pages ({Object.entries(result.queued).map(([type, n]) => countOf(n, type)).join(', ')}). {result.removed > 0 && ` Also told it about ${result.removed} pages no longer live (in Trash or unpublished), so it drops them.`} They reach the chatbot over the next minute or two.
           {result.skipped.length > 0 && <span className="text-muted"> {result.skipped.length} couldn&apos;t be queued (no public address yet).</span>}
         </p>
       )}
