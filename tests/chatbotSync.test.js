@@ -10,7 +10,7 @@ import express from 'express';
 import { startTestApp } from './helpers/testApp.js';
 import { config } from '../server/config.js';
 import { __clearWordPressCachesForTests } from '../server/integrations/wordpressClient.js';
-import { buildSyncPayload, queueChatbotSync, drainChatbotQueue } from '../server/integrations/chatbotSync.js';
+import { buildSyncPayload, chatbotFields, queueChatbotSync, drainChatbotQueue } from '../server/integrations/chatbotSync.js';
 
 const SECRET = 'tUw0Zs+Qm4Yb9vKx2Lr7Np3Hd8Jc5Fg1Ae6Ti0Ow=';
 const UNI_ACF = { university_name: 'Test University Online', about_content: '<p>About.</p>', faqs: [{ question: 'Q?', answer: 'A.' }] };
@@ -29,6 +29,27 @@ test('the payload is the chatbot\'s §3 shape, with linked pages as post IDs', (
   // A parent not on WordPress yet: sent anyway - the chatbot stores the page and links it later.
   assert.ok(buildSyncPayload({ pageType: 'course', postId: 9, link, acf: {} }).payload);
   for (const bad of ['https://staging.degreebaba.com/?p=12', '', null, 'not a url']) assert.ok(buildSyncPayload({ pageType: 'course', postId: 9, link: bad, acf: {} }).skip, String(bad));
+});
+
+test('fields WordPress holds in a shape the chatbot refuses are converted, not sent as-is', () => {
+  const acf = {
+    nirf_rank: '#25',
+    eligibility_content: [
+      { eligibility_title: 'Educational Qualification', eligibility_description: '<p>A bachelor\'s degree from a recognized university</p>', eligibility_icon: null },
+      { eligibility_title: 'Minimum Marks', eligibility_description: 'At least 50% at graduation.' }
+    ],
+    faqs: [{ question: 'Q?', answer: 'A.' }]
+  };
+  const out = chatbotFields(acf);
+  assert.equal(out.nirf_rank, 25);
+  assert.equal(out.eligibility_content, 'Educational Qualification: A bachelor\'s degree from a recognized university. Minimum Marks: At least 50% at graduation.');
+  assert.deepEqual(out.faqs, acf.faqs, 'everything else goes as WordPress has it');
+  assert.equal(acf.nirf_rank, '#25', 'the published fields themselves are left alone');
+  assert.equal(chatbotFields({ nirf_rank: '' }).nirf_rank, null);
+  assert.equal(chatbotFields({ nirf_rank: 12 }).nirf_rank, 12);
+  assert.equal(chatbotFields({ eligibility_content: [] }).eligibility_content, null);
+  assert.equal(chatbotFields({ eligibility_content: 'Already text.' }).eligibility_content, 'Already text.');
+  assert.equal(buildSyncPayload({ pageType: 'university', postId: 1, link: 'https://x.test/university/a/', acf }).payload.acf.nirf_rank, 25);
 });
 
 // ---------------------------------------------------------------- queued and sent

@@ -28,6 +28,32 @@ export function chatbotSyncConfigured() {
 const isoNow = () => new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 const isoAfter = (ms) => new Date(Date.now() + ms).toISOString().replace(/\.\d{3}Z$/, 'Z');
 
+const plain = (html) => String(html ?? '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+
+// Two fields WordPress holds in a shape the chatbot's catalog models refuse - and a refused field
+// refuses the whole page (422): nirf_rank must be a whole number ("#25" -> 25), and eligibility_content
+// is plain text (the chatbot shows it on a card), where WordPress has title/description rows.
+export function chatbotFields(acf = {}) {
+  const fields = { ...acf };
+  if ('nirf_rank' in fields && typeof fields.nirf_rank !== 'number') {
+    const digits = /\d+/.exec(String(fields.nirf_rank ?? ''));
+    fields.nirf_rank = digits ? Number(digits[0]) : null;
+  }
+  if (Array.isArray(fields.eligibility_content)) {
+    const text = fields.eligibility_content
+      .map(row => {
+        const title = plain(row?.eligibility_title);
+        let desc = plain(row?.eligibility_description);
+        if (desc && !/[.!?]$/.test(desc)) desc += '.';
+        return title && desc ? `${title}: ${desc}` : title || desc;
+      })
+      .filter(Boolean)
+      .join(' ');
+    fields.eligibility_content = text || null;
+  }
+  return fields;
+}
+
 // The chatbot's payload (§3) for one published page, or { skip: reason }.
 export function buildSyncPayload({ pageType, postId, link, acf, linkedIds = {}, modified = isoNow() }) {
   let url;
@@ -36,7 +62,7 @@ export function buildSyncPayload({ pageType, postId, link, acf, linkedIds = {}, 
   const slug = path.split('/').filter(Boolean).pop();
   if (!url || !slug || url.search) return { skip: 'the page has no public address yet' };
   const one = (v) => (Array.isArray(v) ? v[0] : v);
-  const fields = { ...acf };
+  const fields = chatbotFields(acf);
   for (const key of ['linked_university', 'linked_course']) {
     if (one(linkedIds[key])) fields[key] = Number(one(linkedIds[key]));
   }
