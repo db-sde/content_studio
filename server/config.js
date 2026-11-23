@@ -45,6 +45,13 @@ export const config = {
   // Approximate — drifts with the market. Update periodically rather than trusting long-term.
   usdToInrRate: Number(process.env.USD_TO_INR_RATE || 96),
 
+  // The DegreeBaba chatbot's catalog sync (server/integrations/chatbotSync.js). Off unless both are
+  // set; the secret is the one the chatbot has as CATALOG_WEBHOOK_SECRET (32+ characters).
+  chatbot: {
+    baseUrl: (process.env.CHATBOT_BASE_URL || '').trim().replace(/\/+$/, ''),
+    webhookSecret: process.env.CHATBOT_CATALOG_WEBHOOK_SECRET || ''
+  },
+
   wordpress: {
     siteUrl: (process.env.WORDPRESS_SITE_URL || '').replace(/\/+$/, ''),
     appUser: process.env.WORDPRESS_APP_USER || '',
@@ -87,7 +94,9 @@ export const config = {
     // Outbound calls to services we don't control. The image pipeline gets longer because a
     // freshly woken Render instance can take ~30-50s to answer its first request.
     imagePipelineTimeoutMs: numberFromEnv('IMAGE_PIPELINE_TIMEOUT_MS', 60000),
-    wordpressTimeoutMs: numberFromEnv('WORDPRESS_TIMEOUT_MS', 30000)
+    wordpressTimeoutMs: numberFromEnv('WORDPRESS_TIMEOUT_MS', 30000),
+    // The chatbot runs on Render too and may need a minute to wake; a send that times out is retried.
+    chatbotTimeoutMs: numberFromEnv('CHATBOT_TIMEOUT_MS', 60000)
   },
 
   // The separate Python/FastAPI image-generation service (image_pipeline/) — see

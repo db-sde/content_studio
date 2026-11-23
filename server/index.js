@@ -1,6 +1,7 @@
 import { config } from './config.js';
 import { getDb } from './db/index.js';
 import { createApp } from './app.js';
+import { startChatbotSyncLoop } from './integrations/chatbotSync.js';
 
 // Boot sequence: open DB (which runs migrations) before starting the HTTP server, so the
 // server never accepts a request against a not-yet-migrated database. Now async (Postgres/Neon)
@@ -16,6 +17,8 @@ const app = createApp()
 
 app.listen(config.port, () => {
   console.log(`[server] listening on http://localhost:${config.port}`);
+  // Sends published pages to the chatbot (and retries ones it missed); off unless configured.
+  if (startChatbotSyncLoop()) console.log(`[server] chatbot catalog sync on (${config.chatbot.baseUrl})`);
   if (!config.anthropicApiKey) console.warn('[server] ANTHROPIC_API_KEY not set — AI generation routes will fail until content_studio/.env is configured.');
   if (!config.openaiApiKey) console.warn('[server] OPENAI_API_KEY not set — AI evaluation routes will fail until content_studio/.env is configured.');
 });

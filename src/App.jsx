@@ -1037,7 +1037,7 @@ function ContentStudioApp() {
     if (!activeDraftId || isPublishing) return;
     setIsPublishing(true);
     try {
-      const { draft, skipped = [], recreated } = await draftsClient.publishToWordPress(activeDraftId);
+      const { draft, skipped = [], recreated, chatbot } = await draftsClient.publishToWordPress(activeDraftId);
       dispatch({ type: ACTIONS.SET_WORDPRESS_URL, payload: { wordpressUrl: draft.wordpress_url } });
       refreshDraftsList();
       toast.success(recreated
@@ -1046,6 +1046,9 @@ function ContentStudioApp() {
       // What had no matching field on the WordPress site (or no page to link to yet) - published
       // without it, so the Admin knows what to add there by hand.
       if (skipped.length) toast.info(`Not sent to WordPress: ${skipped.join('; ')}`, 20000);
+      // The chatbot's copy goes in the background; say so, or why it wasn't sent.
+      if (chatbot?.status === 'queued') toast.info('Also sent to the chatbot - it updates its catalog within a few minutes.');
+      else if (chatbot?.status === 'skipped' && chatbot.reason && !/only takes/.test(chatbot.reason)) toast.info(`Not sent to the chatbot: ${chatbot.reason}.`, 12000);
     } catch (e) {
       console.error('Error publishing to WordPress', e);
       toast.error(e.message || 'Failed to publish to WordPress');

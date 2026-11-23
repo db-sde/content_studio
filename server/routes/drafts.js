@@ -26,6 +26,7 @@ import { getInitialState } from '../../src/config/schemas.js';
 import { isSummaryPageType, SUMMARY_AI_FIELDS, readingTimeOf } from '../../src/config/summaryPages.js';
 import { generateSummaryFields, generateSummary, generateSeo } from '../ai/blogSummary.js';
 import { acceptSummaryDocument, documentText, safeFilename, UPLOAD_SOURCE } from '../integrations/summaryDocument.js';
+import { queueChatbotSync } from '../integrations/chatbotSync.js';
 
 export const draftsRouter = Router();
 
@@ -726,9 +727,12 @@ draftsRouter.post('/:id/publish-to-wordpress', asyncRoute(async (req, res) => {
   }
 
   const updated = await setWordpressPublishInfo(draft.id, { postId: published.id, url: published.link });
+  // The page goes to the chatbot's catalog in the background (queued here, never awaited over the
+  // network); `chatbot` says whether it was queued, skipped (and why), or the sync is off.
+  const chatbot = await queueChatbotSync({ draftId: draft.id, pageType: draft.page_type, published });
   // `skipped`: fields that had no place on the WordPress site, shown to the Admin after publishing.
   // `recreated`: the page published last time had been deleted or trashed in WordPress, so this one is new.
-  res.json({ draft: updated, skipped: published.skipped, recreated: published.recreated });
+  res.json({ draft: updated, skipped: published.skipped, recreated: published.recreated, chatbot });
 }));
 
 // --- Image pipeline (image_pipeline/, a separate Python service — see

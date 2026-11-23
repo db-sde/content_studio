@@ -366,5 +366,6 @@ export async function publishDraftToWordPress({ pageType, title, acfFields, exis
   }
 
   if (skipped.length) console.warn(`[wordpress] published ${slug} ${post.id}; not sent: ${skipped.join('; ')}`);
-  return { id: post.id, link: post.link, status: post.status, skipped, recreated };
+  // acf and linkedIds: what WordPress now holds, for the chatbot's copy (see chatbotSync.js).
+  return { id: post.id, link: post.link, status: post.status, skipped, recreated, acf, linkedIds: linked.ids };
 }
