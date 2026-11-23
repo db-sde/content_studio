@@ -46,7 +46,7 @@ export const config = {
   usdToInrRate: Number(process.env.USD_TO_INR_RATE || 96),
 
   // The DegreeBaba chatbot's catalog sync (server/integrations/chatbotSync.js). Off unless both are
-  // set; the secret is the one the chatbot has as CATALOG_WEBHOOK_SECRET (32+ characters).
+  // set; the secret is the one the chatbot (db-sde/chat_bot) has as CATALOG_WEBHOOK_SECRET.
   chatbot: {
     baseUrl: (process.env.CHATBOT_BASE_URL || '').trim().replace(/\/+$/, ''),
     webhookSecret: process.env.CHATBOT_CATALOG_WEBHOOK_SECRET || ''
